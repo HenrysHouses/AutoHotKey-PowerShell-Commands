@@ -57,7 +57,11 @@ PipeWrite(content, pipeName) {
     }
 
     if pipe == -1 {
-        MsgBox("there is no pwsh-pipe-daemon with open pipes available")
+        result := MsgBox("there is no pwsh-pipe-daemon with open pipes available, Try to start one?", "Confirmation", "0x4")
+        if (result = "Yes")
+        {
+            Run("pwsh -Command pwsh-pipe-daemon", , "Hide")
+        }
         return
     }
 
