@@ -28,4 +28,6 @@ My config scripts rely on the wlines binary. it should be portable so it can wor
 but the -fzf flag relies on fzf being installed. This is to make the same scripts usable as TUI instead of GUI
 
 As i use glazewm for window management the tab replacement script i use by defult also uses the glazewm cli. so if you dont have that. use the windows-tab script instead
+The open directory / path script also relies on zoxide to resolve unknown paths. so if you want an easier time using that script. get zoxide
+https://github.com/ajeetdsouza/zoxide
 
