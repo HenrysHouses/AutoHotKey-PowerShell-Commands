@@ -52,11 +52,6 @@ content := "__FROM__:AutoHotKeys`nwlines-path -Explorer"
     PipeWrite(content, pipeName)
 }
 
-^!m:: {
-    content := "__FROM__:AutoHotKeys`nwlines-music"
-    PipeWrite(content, pipeName)
-}
-
 
 ; JSON library for v2.0
 class JSON {
