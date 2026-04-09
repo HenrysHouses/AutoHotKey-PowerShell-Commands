@@ -28,7 +28,7 @@ OnExit(KillConnection)
 }
 
 ^!Tab:: {
-    content := "__FROM__:AutoHotKeys`nwlines-glazewm-tab -HideMode"
+    content := "__FROM__:AutoHotKeys`nwlines-windows-tab -HideMode"
     PipeWrite(content, pipeName)
 }
 
