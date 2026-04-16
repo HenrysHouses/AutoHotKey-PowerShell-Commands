@@ -35,7 +35,7 @@ Once installed, keep the two scripts running and that's it
 Optional step: add the pwsh-pipe-daemon script to your shell's path environment variable
 
 
-# My confi
+# My config
 
 Dependencies:
 
