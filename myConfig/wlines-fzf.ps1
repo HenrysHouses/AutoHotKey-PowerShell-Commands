@@ -1,6 +1,7 @@
 param (
-    [string]$InputContent,
-    [string]$Prompt
+    [Parameter(ValueFromPipeline)]
+    [string]$InputContent,  # Captures single input from the pipeline
+    [string]$p              # Captures single input from the argument (matches wlines-rofi.ps1)
 )
 
 # Capture pipeline input if it's provided
@@ -15,9 +16,9 @@ $fzfArgs = @(
     '--height=50%'
 )
 
-if ($Prompt)
+if ($p)
 {
-    $fzfArgs += @('--prompt', "$Prompt> ")
+    $fzfArgs += @('--prompt', "$p> ")
 }
 
 # Pipe content to fzf and get selection

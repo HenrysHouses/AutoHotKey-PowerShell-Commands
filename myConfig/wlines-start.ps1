@@ -8,10 +8,36 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$WlinesWrapper = if ($fzf) {
+$WlinesWrapper = if ($fzf)
+{
     Join-Path $PSScriptRoot 'wlines-fzf.ps1'
-} else {
+} else
+{
     Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+}
+
+# Auto-detect SSH session
+$IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
+if ($IsRemoteSession)
+{
+    Write-Host "SSH session detected - commands will execute on local machine via pwsh-daemon"
+}
+
+function Invoke-RemoteCommand
+{
+    param([string]$Command)
+    
+    if ($IsRemoteSession)
+    {
+        # Send to daemon for remote execution (pwsh-msg handles SSH detection)
+        & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $Command -Name "Start"
+    } else
+    {
+        # Execute locally
+        Invoke-Expression $Command
+    }
 }
 $CacheDir = Join-Path $env:LOCALAPPDATA 'wlines'
 $CachePath = Join-Path $CacheDir 'start-menu-cache.json'
@@ -257,12 +283,14 @@ function Invoke-LauncherItem
     {
         'Appx'
         {
-            Start-Process 'explorer.exe' "shell:AppsFolder\$($Item.Target)"
+            $cmd = "Start-Process 'explorer.exe' `"shell:AppsFolder\$($Item.Target)`""
+            Invoke-RemoteCommand -Command $cmd
             return
         }
         'Shortcut'
         {
-            Start-Process -FilePath $Item.Target
+            $cmd = "Start-Process -FilePath `"$($Item.Target)`""
+            Invoke-RemoteCommand -Command $cmd
             return
         }
         'Command'
@@ -277,22 +305,26 @@ function Invoke-LauncherItem
             {
                 '.ps1'
                 {
-                    Start-Process -FilePath 'pwsh.exe' -WindowStyle $windowStyle -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Item.Target)
+                    $cmd = "Start-Process -FilePath 'pwsh.exe' -WindowStyle $windowStyle -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', `"$($Item.Target)`")"
+                    Invoke-RemoteCommand -Command $cmd
                     return
                 }
                 '.bat'
                 {
-                    Start-Process -FilePath 'cmd.exe' -WindowStyle $windowStyle -ArgumentList @('/c', $Item.Target)
+                    $cmd = "Start-Process -FilePath 'cmd.exe' -WindowStyle $windowStyle -ArgumentList @('/c', `"$($Item.Target)`")"
+                    Invoke-RemoteCommand -Command $cmd
                     return
                 }
                 '.cmd'
                 {
-                    Start-Process -FilePath 'cmd.exe' -WindowStyle $windowStyle -ArgumentList @('/c', $Item.Target)
+                    $cmd = "Start-Process -FilePath 'cmd.exe' -WindowStyle $windowStyle -ArgumentList @('/c', `"$($Item.Target)`")"
+                    Invoke-RemoteCommand -Command $cmd
                     return
                 }
                 default
                 {
-                    Start-Process -FilePath $Item.Target
+                    $cmd = "Start-Process -FilePath `"$($Item.Target)`""
+                    Invoke-RemoteCommand -Command $cmd
                     return
                 }
             }
@@ -320,7 +352,7 @@ $labels = @(
     $items.Label
 ) -join "`n"
 
-$selection = & $WlinesWrapper -InputContent $labels 'Start'
+$selection = & $WlinesWrapper -InputContent $labels -p 'Start'
 if ([string]::IsNullOrWhiteSpace($selection))
 {
     return

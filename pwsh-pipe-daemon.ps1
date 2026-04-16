@@ -1,10 +1,15 @@
 param(
     [switch]$List,
-    [int]$Kill = -1
+    [int]$Kill = -1,
+    [string]$PipeName = "PWSH_COMMAND_PIPE"
 )
 
 Import-Module Microsoft.PowerShell.Utility  
 Import-Module Microsoft.PowerShell.Management
+
+$pipeName = $PipeName
+$powerShellInstances = @{}
+$activeCommands = @{}
 
 # Handle -List parameter to show running instances
 if ($List)
@@ -39,25 +44,79 @@ if ($List)
             {
                 # Process is still running
                 $instances += $content
-                Write-Host "PID: $($content.PID) | $($content.WindowTitle) | Created: $($content.CreatedAt)" -ForegroundColor Cyan
-                Write-Host "  Pool: $($content.PoolSize)/5 instances | Commands: $($content.RunningCommands.Count)" -ForegroundColor Gray
+
+                if ($content.PoolSize -lt 1)
+                {
+                    $Connector = "└──"
+                } else
+                {
+                    $Connector = "└┬─"
+                }
+
+                Write-Host "DEMON: $($content.WindowTitle) | Created: $($content.CreatedAt)" -ForegroundColor Cyan
+                Write-Host "$Connector $($content.PoolSize)/5 instances | Commands: $($content.RunningCommands.Count)" -ForegroundColor Gray
                 
                 # Show all instances in the pool
                 if ($content.Instances -and $content.Instances.Count -gt 0)
                 {
-                    foreach ($inst in $content.Instances)
+                    # foreach ($inst in $content.Instances)
+                    for ($index = 0; $index -lt $content.Instances.Count; $index++)
                     {
-                        $status = "idle"
-                        if ($inst.IsActive) { $status = "ACTIVE" }
-                        elseif ($inst.IsBusy) { $status = "busy" }
-                        elseif ($inst.IsDirty) { $status = "dirty" }
+                        $inst = $content.instances[$index]
+                        $status = "IDLE"
+                        if ($inst.IsActive)
+                        { $status = "ACTIVE" 
+                        } elseif ($inst.IsBusy)
+                        { $status = "BUSY" 
+                        } elseif ($inst.IsDirty)
+                        { $status = "DIRTY" 
+                        }
                         
-                        $color = if ($inst.IsActive) { "Green" } elseif ($inst.IsBusy) { "Yellow" } elseif ($inst.IsDirty) { "Red" } else { "Gray" }
-                        Write-Host "    [$status] $($inst.Id)" -ForegroundColor $color
+                        $color = if ($inst.IsActive)
+                        { "Green" 
+                        } elseif ($inst.IsBusy)
+                        { "Yellow" 
+                        } elseif ($inst.IsDirty)
+                        { "Red" 
+                        } else
+                        { "Gray" 
+                        }
+
+                        if ($index -lt $content.instances.Count-1)
+                        {
+                            if ($content.instances[$index].Command)
+                            {
+                                $Connector =    "├┬─"
+                                $CmdConnector = "│└──"
+                            }
+                            else
+                            {
+                                $Connector =    "├──"
+                                $CmdConnector = ""
+                            }
+                        } else
+                        {
+                            if ($content.instances[$index].Command)
+                            {
+                                $Connector =    "└┬─"
+                                $CmdConnector = " └──"
+                            }
+                            else
+                            {
+                                $Connector =    "└──"
+                                $CmdConnector = ""
+                            }
+                        }
+
+                        $displayCommand = if ($inst.Command)
+                        { " `n $CmdConnector Cmd: $($inst.Command)" 
+                        } else
+                        { " " 
+                        }
+                        Write-Host " $Connector[$status] $($inst.Id)$displayCommand" -ForegroundColor $color
                     }
                 }
-            }
-            else
+            } else
             {
                 # Process is dead - get its state and clean up
                 Write-Host "PID: $($content.PID) | $($content.WindowTitle) | State: DEAD | Created: $($content.CreatedAt)" -ForegroundColor Red
@@ -67,8 +126,7 @@ if ($List)
                 }
                 Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
             }
-        }
-        catch
+        } catch
         {
             Write-Host "[WARNING] Failed to parse: $($file.Name)" -ForegroundColor Yellow
         }
@@ -119,20 +177,17 @@ if ($Kill -ge 0)
             if (-not (Get-Process -Id $Kill -ErrorAction SilentlyContinue))
             {
                 Write-Host "[OK] pwsh-daemon instance $Kill successfully terminated" -ForegroundColor Green
-            }
-            else
+            } else
             {
                 Write-Host "[ERROR] Failed to terminate pwsh-daemon instance $Kill" -ForegroundColor Red
                 exit 1
             }
-        }
-        else
+        } else
         {
             Write-Host "[INFO] Process $Kill not running, cleaning up stale temp file" -ForegroundColor Yellow
             Remove-Item -Path $daemonTempFile -Force -ErrorAction SilentlyContinue
         }
-    }
-    else
+    } else
     {
         Write-Host "[ERROR] No daemon instance found with PID: $Kill" -ForegroundColor Red
         exit 1
@@ -144,58 +199,35 @@ if ($Kill -ge 0)
 $Host.UI.RawUI.WindowTitle = 'pwsh-pipe-daemon'
 [Console]::Title = 'pwsh-pipe-daemon'
 
-# Get the script path for singleton check
-$scriptPath = $PSScriptRoot
+# Check for existing running instances using temp files
+$daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
 
-# Singleton check - ensure only one instance of this daemon is running
-$daemonProcessName = 'pwsh'
-$currentProcessId = $PID
-
-# Check for existing running instances
-$existingInstances = Get-Process -Name $daemonProcessName -ErrorAction SilentlyContinue | Where-Object {
-    $proc = $_
-    try
-    {
-        $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId=$($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-        $cmdLine -and $cmdLine -match ([regex]::Escape($scriptPath)) -and $proc.Id -ne $currentProcessId
-    } catch
-    {
-        $false
-    }
-}
-
-# If an instance exists, check if it actually exited gracefully
-if ($existingInstances)
+if (Test-Path $daemonTempDir)
 {
-    $logDir = Join-Path $env:LOCALAPPDATA 'wlines'
-    $logPath = Join-Path $logDir 'pwsh-pipe-daemon.log'
-    
-    $cleanExit = $false
-    if (Test-Path $logPath)
+    $daemonFiles = Get-ChildItem -Path $daemonTempDir -Filter "daemon_*.json" -ErrorAction SilentlyContinue
+    foreach ($file in $daemonFiles)
     {
-        # Check if the log shows a clean shutdown from the last run
-        $lastLines = Get-Content $logPath -Tail 5 -ErrorAction SilentlyContinue
-        $cleanExit = $lastLines | Where-Object { $_ -match '\[Daemon\] Killing Process' }
-    }
-    
-    if ($cleanExit)
-    {
-        # Previous instance shut down cleanly but process still exists - allow restart
-        Write-Host "[INFO] Previous instance shutdown detected (found 'Killing Process' in logs)." -ForegroundColor Yellow
-        Write-Host "[INFO] Proceeding with restart..." -ForegroundColor Yellow
-    } else
-    {
-        # Previous instance is still running or crashed without clean shutdown
-        $existingInstances | ForEach-Object {
-            if ($_.CommandLine -eq "pwsh -Command pwsh-pipe-daemon")
+        try
+        {
+            $content = Get-Content -Path $file.FullName | ConvertFrom-Json
+            if ($content.PipeName -eq $pipeName -and $content.PID -ne $PID)
             {
-                Write-Host "[ERROR] Another instance of pwsh-pipe-daemon is already running:" -ForegroundColor Red
-                Write-Host "  PID: $($_.Id), Command: $($_.CommandLine)" -ForegroundColor Red
-                Write-Host "`nIf the previous instance crashed, wait a moment and try again." -ForegroundColor Yellow
-                Write-Host "Or kill it manually: Stop-Process -Id $($_.Id) -Force`n" -ForegroundColor Yellow
+                $proc = Get-Process -Id $content.PID -ErrorAction SilentlyContinue
+                if ($proc)
+                {
+                    Write-Host "[ERROR] Another instance of pwsh-pipe-daemon is already running with pipe: $pipeName" -ForegroundColor Red
+                    Write-Host "  PID: $($content.PID), Created: $($content.CreatedAt)" -ForegroundColor Red
+                    Write-Host "  If the previous instance crashed, wait a moment and try again." -ForegroundColor Yellow
+                    exit 1
+                } else
+                {
+                    # Process is dead, clean up stale file
+                    Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+                }
             }
+        } catch
+        { 
         }
-        exit 1
     }
 }
 
@@ -215,7 +247,7 @@ if (-not (Test-Path $daemonTempDir))
 }
 $daemonTempFile = Join-Path $daemonTempDir "daemon_$PID.json"
 
-function UpdateDaemonTempFile()
+function UpdateDaemonTempFile
 {
     # Update temp file with all pool instances and active command info
     $runningCommands = @($activeCommands.Keys | Where-Object { $_ })  # Filter out nulls
@@ -225,45 +257,51 @@ function UpdateDaemonTempFile()
     foreach ($key in $powerShellInstances.Keys)
     {
         $instance = $powerShellInstances[$key]
-        $isActive = $activeCommands.Values | Where-Object { $_.PowerShell.InstanceId -eq $key }
+        
+        # Find if this instance is running a command
+        $activeEntry = $activeCommands.GetEnumerator() | Where-Object { $_.Value.PowerShell.InstanceId -eq $key }
+        $cmdString = if ($activeEntry)
+        { $activeEntry.Key 
+        } else
+        { $null 
+        }
+
         $allInstances += @{
             Id = $key
             IsBusy = $instance.IsBusy
             IsDirty = $instance.IsDirty
-            IsActive = $isActive -ne $null
+            IsActive = $null -ne $activeEntry
+            Command = $cmdString
         }
-
     }
     
     $metadata = @{
         PID = $PID
+        PipeName = $pipeName
         ProcessName = 'pwsh-pipe-daemon'
         WindowTitle = $Host.UI.RawUI.WindowTitle
         CreatedAt = [DateTime]::UtcNow.ToString("o")
-        ScriptPath = $scriptPath
         PoolSize = $powerShellInstances.Count
         Instances = $allInstances
         RunningCommands = $runningCommands
     }
     $jsonStr = $metadata | ConvertTo-Json -Depth 3
-    if (-not $jsonStr) {
+    if (-not $jsonStr)
+    {
         $jsonStr = '{}' 
     }
     Set-Content -Path $daemonTempFile -Value $jsonStr -Force
 }
 
-$pipeName = "PWSH_COMMAND_PIPE"
 $previousInvoke = ""
 $previousTime = ""
-$pipe = $nul
+$pipe = $null
 $closed = $false
 
 # Update window title with pipe name and status
 [Console]::Title = "pwsh-pipe-daemon [$pipeName] - PID: $PID"
 $Host.UI.RawUI.WindowTitle = "pwsh-pipe-daemon [$pipeName] - PID: $PID"
 
-$powerShellInstances = @{}
-$activeCommands = @{}
 $instanceCount = 0
 $runspacePool = [runspacefactory]::CreateRunspacePool(1, 5)
 $runspacePool.Open()
@@ -274,13 +312,37 @@ UpdateDaemonTempFile
 $cancellationTokenSource = [System.Threading.CancellationTokenSource]::new()
 $token = $cancellationTokenSource.Token
 
-Write-Host "[Daemon] Listening on pipe '$pipeName'`n"
+$bannerWidth = 55
+$col1Width = 19
+$col2Width = 35
+
+$header = "PowerShell Pipe Daemon"
+$hPad = [math]::Floor(($bannerWidth - $header.Length) / 2)
+$hLeft = " " * $hPad
+$hRight = " " * ($bannerWidth - $header.Length - $hPad)
+
+$pipeLabel = " Listening On Pipe"
+$pVal = " $pipeName"
+$pRight = " " * [math]::Max(0, ($col2Width - $pVal.Length))
+
+$pidLabel = " Daemon PID"
+$pidVal = " $PID"
+$pidRight = " " * [math]::Max(0, ($col2Width - $pidVal.Length))
+
+Write-Host "╔$((New-Object String '═', $bannerWidth))╗"
+Write-Host "║$hLeft$header$hRight║"
+Write-Host "╟$((New-Object String '─', $col1Width))┬$((New-Object String '─', $col2Width))╢"
+Write-Host "║$($pipeLabel.PadRight($col1Width))│$pVal$pRight║"
+Write-Host "╟$((New-Object String '─', $col1Width))┼$((New-Object String '─', $col2Width))╢"
+Write-Host "║$($pidLabel.PadRight($col1Width))│$pidVal$pidRight║"
+Write-Host "╚$((New-Object String '═', $col1Width))╧$((New-Object String '═', $col2Width))╝ `n"
+# Write-Host ""
+
 Write-Host "[Time Stamp] - [Event Log]"
-Write-Host "----------------------------------------------------"
+Write-Host "─────────────────────────────────────────────────────────"
 
-function IdleUpdate()
+function IdleUpdate
 {
-
     $completedCommands = $activeCommands.GetEnumerator() |
         Where-Object { $_.Value.AsyncResult.IsCompleted } |
         ForEach-Object { $_.Key }
@@ -292,6 +354,7 @@ function IdleUpdate()
         $startedTime = [DateTime]::ParseExact($activeCommands[$cmd].StartTime, "HH:mm:ss.fff", $null)
         $duration = $time - $startedTime
         $durationFormatted = $duration.ToString("hh\:mm\:ss\.fff")
+        $durationString = Format-Duration $duration
 
         $instanceID = $activeCommands[$cmd].PowerShell.InstanceId
         $results = $activeCommands[$cmd].PowerShell.EndInvoke($activeCommands[$cmd].AsyncResult)
@@ -301,7 +364,7 @@ function IdleUpdate()
             $results | ForEach-Object { Write-Host "  $_" }
         }
 
-        Write-Host "$timeFormatted - [Daemon] Completed Invocation: '$cmd', duration: $durationFormatted"
+        Write-Host "$timeFormatted - [INFO] Completed Invocation: '$cmd', duration: $durationString" -ForegroundColor Green
                         
         $instanceID = $activeCommands[$cmd].PowerShell.InstanceId
         if ($instanceID)
@@ -314,7 +377,6 @@ function IdleUpdate()
 
         if ($powerShellInstances[$instanceID].IsDirty -and -not $powerShellInstances[$instanceID].IsBusy)
         {
-            Write-Host "Removed bad powershell instance"
             $powerShellInstances[$instanceID].Shell.Dispose()
             $powerShellInstances.Remove($instanceID)
         }
@@ -346,7 +408,7 @@ function IdleUpdate()
         } catch
         {
             # Silently ignore title update failures
-            Write-Host "[Warning] Failed to update window title on completion: $_"
+            Write-Host "$time - [Warning] Failed to update window title on completion: $_"
         }
     }
 
@@ -360,7 +422,6 @@ function IdleUpdate()
         
         foreach ($instance in $idleInstances)
         {
-            Write-Host "Removing excess idle instance: $($instance.Key)"
             $instance.Value.Shell.Dispose()
             $powerShellInstances.Remove($instance.Key)
             $instanceCount--
@@ -369,7 +430,7 @@ function IdleUpdate()
     }
 }
 
-function CreatePipe()
+function CreatePipe
 {
     $pipe = [System.IO.Pipes.NamedPipeServerStream]::new(
         $pipeName,
@@ -381,6 +442,121 @@ function CreatePipe()
     return $pipe
 }
 
+function Get-PowerShellInstance
+{
+    # Try to find an idle instance
+    $ps = $powerShellInstances.Values | 
+        Where-Object { -not $_.IsBusy -and -not $_.IsDirty } |
+        Select-Object -First 1
+
+    if (-not $ps)
+    {
+        # No idle instances found, create a new one
+        $ps = [PowerShell]::Create()
+        $ps.RunspacePool = $runspacePool
+        $powerShellInstances[$ps.InstanceId] = @{
+            Shell = $ps
+            IsBusy = $true
+            IsDirty = $false
+        }
+        $instanceCount++
+        UpdateDaemonTempFile
+    } else
+    {
+        # Found idle instance, mark it as busy and extract Shell
+        $powerShellInstances[$ps.Shell.InstanceId].IsBusy = $true
+        UpdateDaemonTempFile
+        $ps = $ps.Shell
+    }
+    return $ps
+}
+
+function Format-Duration([TimeSpan]$ts)
+{
+    $parts = @()
+    if ($ts.Hours -gt 0 -or $ts.Days -gt 0)
+    {
+        $totalHours = [int]($ts.TotalHours)
+        $parts += "$totalHours`h"
+    }
+    if ($ts.Minutes -gt 0 -or $totalHours -gt 0)
+    {
+        $parts += "$($ts.Minutes)`m"
+    }
+    # seconds with milliseconds: format "S.mmm"
+    $secs = '{0:0}.{1:000}' -f $ts.Seconds, $ts.Milliseconds
+    $parts += "$secs`s"
+    return ($parts -join ' ')
+}
+
+function InvokeMessage
+{
+    param(
+        [object]$powershell,
+        [string]$msg
+    )
+
+    $powershell.Commands.Clear()
+    $powershell.Streams.ClearStreams()
+    $powershell.AddScript($msg) | Out-Null
+    # Check if the command spawns a new process  
+    if ($msg -match '&\s+pwsh|Start-Process')
+    {  
+        $powerShellInstances[$powershell.InstanceId].IsDirty = $true
+    }
+    $input = [System.Management.Automation.PSDataCollection[object]]::new()
+    $settings = New-Object System.Management.Automation.PSInvocationSettings
+    $settings.AddToHistory = $true
+
+    # Display invocation with sender name if provided
+    if ($senderName)
+    {
+        if ($senderName -imatch "ssh:")
+        {
+            Write-Host "$previousTime - [ACTION] Invoke requested by [$senderName]: '$msg'" -ForegroundColor Cyan
+        } else
+        {
+            Write-Host "$previousTime - [ACTION] Invoke requested by [$senderName]: '$msg'" -ForegroundColor DarkCyan
+        }
+    } else
+    {
+        Write-Host "$previousTime - [ACTION] Invoking command: '$msg'" -ForegroundColor Blue
+    }
+                            
+    # Track this command before updating title
+    $asyncResult = $powershell.BeginInvoke($input, $settings, $null, $null)
+
+    $activeCommands[$msg] = @{
+        PowerShell = $powershell
+        AsyncResult = $asyncResult
+        StartTime = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
+    }
+                            
+    # Update temp file with new active command
+    UpdateDaemonTempFile
+                            
+    # Update window title to show running command(s)
+    # Only update if this is the only command, or show count if multiple
+    try
+    {
+        if ($activeCommands.Count -eq 1)
+        {
+            # First command - show it specifically
+            [Console]::Title = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $msg"
+            $Host.UI.RawUI.WindowTitle = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $msg"
+        } elseif ($activeCommands.Count -gt 1)
+        {
+            # Multiple commands running - show count instead
+            [Console]::Title = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $($activeCommands.Count) commands"
+            $Host.UI.RawUI.WindowTitle = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $($activeCommands.Count) commands"
+        }
+    } catch
+    {
+        # Silently ignore title update failures to prevent crashes
+        Write-Host "[Warning] Failed to update window title: $_"
+    }
+}
+
 try
 {
     $pipe = CreatePipe
@@ -390,7 +566,7 @@ try
         try
         {
             $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
-            Write-Host "$time - [Daemon] Waiting For Connection"
+            # Write-Host "$time - [Daemon] Waiting For Connection"
 
             $connectTask = $pipe.WaitForConnectionAsync()
             while (-not $connectTask.IsCompleted)
@@ -400,7 +576,7 @@ try
             }
 
             $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
-            Write-Host "$time - [Messager] Connected"
+            # Write-Host "$time - [Messager] Connected"
             $reader = [System.IO.StreamReader]::new($pipe)
 
             while ($pipe)
@@ -438,12 +614,31 @@ try
                     
                     # Extract sender name if present (before cleaning control characters)
                     $senderName = $null
-                    if ($rawMessage -match '__FROM__:([^\r\n]+)[\r\n]+(.+)') {
-                        $senderName = $matches[1]
-                        $rawMessage = $matches[2]
+
+                    $pattern = '^(?:__FROM__:([^\r\n]+)[\r\n]+)?(?:__RESTART__:(?:\r?\n)?([\s\S]+)|([\s\S]+))$'
+
+                    if ($rawMessage -match $pattern)
+                    {
+                        if ($matches[1])
+                        { $senderName = $matches[1] 
+                        }
+
+                        if ($matches[2])
+                        {
+                            $restart = '__RESTART__:'
+                            $rawMessage = $matches[2]
+                        } else
+                        {
+                            $rawMessage = $matches[3]
+                        }
+
+                        $rawMessage = $rawMessage.TrimStart("`r","`n"," ")
+                        $message = [regex]::Replace($rawMessage, '[\p{C}]', '')
+                    } else
+                    {
+                        # fallback: sanitize original
+                        $message = [regex]::Replace($rawMessage, '[\p{C}]', '')
                     }
-                    
-                    $message = [regex]::Replace($rawMessage, '[\p{C}]', '')
 
                     $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
                     $currentMessage = "$time - $message"
@@ -460,16 +655,33 @@ try
                             $startedTime = [DateTime]::ParseExact($activeCommands[$message].StartTime, "HH:mm:ss.fff", $null)
                             $duration = $time - $startedTime
                             $durationFormatted = $duration.ToString("hh\:mm\:ss\.fff")
-                            Write-Host "$timeFormatted - [Daemon] Cancelled Invocation: $message, duration: $durationFormatted"
+                            $durationString = Format-Duration $duration
+
+                            Write-Host "$timeFormatted - [ACTION] Cancelled Invocation: $message, duration: $durationString" -ForegroundColor DarkYellow
 
                             $cancelledPs = $activeCommands[$message].PowerShell.InstanceId
                             $powerShellInstances[$cancelledPs].IsBusy = $false
                             $activeCommands[$message].PowerShell.Stop()
                             $activeCommands.Remove($message)
+
+                            UpdateDaemonTempFile
+
+                            if ($restart -ne "")
+                            {
+                                if ($powerShellInstances[$cancelledPs].IsDirty)
+                                {
+                                    $powerShellInstances[$cancelledPs].Shell.Dispose()
+                                    $powerShellInstances.Remove($cancelledPs)
+                                }
+                                $ps = Get-PowerShellInstance
+                                InvokeMessage -powershell $ps -msg $message
+                            } else
+                            {
+                            }
                         } elseif ($message -eq "Close Pipe")
                         {
                             $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
-                            Write-Host "$time - [Messager] Disconnected"
+                            # Write-Host "$time - [Messager] Disconnected"
                             $closed = $true
 
                             if ($pipe)
@@ -484,106 +696,44 @@ try
                             break
                         } else
                         {
-                            # Try to find an idle instance
-                            $ps = $powerShellInstances.Values | 
-                                Where-Object { -not $_.IsBusy -and -not $_.IsDirty } |
-                                Select-Object -First 1
-
-                            if (-not $ps)
-                            {
-                                # No idle instances found, create a new one
-                                $ps = [PowerShell]::Create()
-                                $ps.RunspacePool = $runspacePool
-                                $powerShellInstances[$ps.InstanceId] = @{
-                                    Shell = $ps
-                                    IsBusy = $true
-                                    IsDirty = $false
-                                }
-                                $instanceCount++
-                                UpdateDaemonTempFile
-                            } else
-                            {
-                                # Found idle instance, mark it as busy and extract Shell
-                                $powerShellInstances[$ps.Shell.InstanceId].IsBusy = $true
-                                UpdateDaemonTempFile
-                                $ps = $ps.Shell
-                            }
-
-                            $ps.Commands.Clear()
-                            $ps.Streams.ClearStreams()
-                            $ps.AddScript($message) | Out-Null
-                            # Check if the command spawns a new process  
-                            if ($message -match '&\s+pwsh|Start-Process')
-                            {  
-                                $powerShellInstances[$ps.InstanceId].IsDirty = $true
-                            }
-                            $input = [System.Management.Automation.PSDataCollection[object]]::new()
-                            $settings = New-Object System.Management.Automation.PSInvocationSettings
-                            $settings.AddToHistory = $true
-
-                            # Display invocation with sender name if provided
-                            if ($senderName) {
-                                Write-Host "$previousTime - [Daemon] Invoking from [$senderName]: '$message'"
-                            } else {
-                                Write-Host "$previousTime - [Daemon] Invoking: '$message'"
-                            }
-                            
-                            # Track this command before updating title
-                            $asyncResult = $ps.BeginInvoke($input, $settings, $null, $null)
-
-                            $activeCommands[$message] = @{
-                                PowerShell = $ps
-                                AsyncResult = $asyncResult
-                                StartTime = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
-                            }
-                            
-                            # Update window title to show running command(s)
-                            # Only update if this is the only command, or show count if multiple
-                            try
-                            {
-                                if ($activeCommands.Count -eq 1)
-                                {
-                                    # First command - show it specifically
-                                    [Console]::Title = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $message"
-                                    $Host.UI.RawUI.WindowTitle = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $message"
-                                } elseif ($activeCommands.Count -gt 1)
-                                {
-                                    # Multiple commands running - show count instead
-                                    [Console]::Title = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $($activeCommands.Count) commands"
-                                    $Host.UI.RawUI.WindowTitle = "pwsh-pipe-daemon [$pipeName] - PID: $PID | Running: $($activeCommands.Count) commands"
-                                }
-                            } catch
-                            {
-                                # Silently ignore title update failures to prevent crashes
-                                Write-Host "[Warning] Failed to update window title: $_"
-                            }
+                            $ps = Get-PowerShellInstance
+                            InvokeMessage -powershell $ps -msg $message
                         }
                     } else
                     {
-                        Write-Host "$time - [Daemon] Skipped Identical Command"
+                        Write-Host "$time - [INFO] Skipped Identical Command"
                     }
                 }
             }
+        } catch 
+        {
+            $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
+            Write-Host "$time - [ERROR] Exception Message:`n   $($_.Exception.Message)" -ForegroundColor Red
         } finally
         {
-            if (-not $closed)
+            $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
+            if ($_.Exception -and $_.Exception.Message)
             {
-                $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
-                Write-Host "$time - [Messager] Lost Connection"
-
+                Write-Host "$time - [ERROR] Named pipe broke due to an error: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "$time - [INFO] Recreating pipe..." -ForegroundColor Yellow
+            } elseif (-not $closed)
+            {
+                Write-Host "$time - [INFO] Connection closed. Listening for new connection..." -ForegroundColor Gray
             }
 
-            if (-not $pipe)
+            if ($null -eq $pipe -or -not $pipe.IsConnected)
             {
-                if ($pipe)
+                try
                 {
-                    $pipe.Dispose()
+                    if ($pipe)
+                    { $pipe.Dispose() 
+                    }
+                    if ($reader)
+                    { $reader.Dispose() 
+                    }
+                } catch
+                { 
                 }
-                if ($reader)
-                {
-                    $reader.Close()
-                }
-
                 $pipe = CreatePipe
             }
             $closed = $false
@@ -592,13 +742,12 @@ try
 } catch
 {
     $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
-    Write-Host "$time - [Daemon] Could not recover from fatal error"
-    Write-Host $_.Exception.Message
+    Write-Host "$time - [ERROR] Could not recover from fatal error. Exception Message:`n   $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 } finally
 {
     $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
-    Write-Host "$time - [Daemon] Killing Process"
+    Write-Host "$time - [DAEMON] Killing Process"
     [Console]::Title = "pwsh-pipe-daemon [DEAD] - PID: $PID"
     
     # Clean up temp file tracking this instance

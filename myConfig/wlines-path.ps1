@@ -7,10 +7,35 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$WlinesWrapper = if ($fzf) {
+$WlinesWrapper = if ($fzf)
+{
     Join-Path $PSScriptRoot 'wlines-fzf.ps1'
-} else {
+} else
+{
     Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+}
+
+# Auto-detect SSH session
+$IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
+if ($IsRemoteSession)
+{
+    Write-Host "SSH session detected - file managers will execute on local machine via pwsh-daemon"
+}
+
+function Invoke-RemoteCommand
+{
+    param([string]$Command)
+    
+    if ($IsRemoteSession)
+    {
+        # pwsh-msg.ps1 handles SSH detection automatically
+        & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $Command -Name "Explorer"
+    } else
+    {
+        Invoke-Expression $Command
+    }
 }
 $HistoryDir = Join-Path $env:LOCALAPPDATA 'wlines'
 $HistoryPath = Join-Path $HistoryDir 'path-history.txt'
@@ -135,13 +160,20 @@ function Open-InExplorer
 {
     param([Parameter(Mandatory)][string]$ResolvedPath)
 
-    $item = Get-Item -LiteralPath $ResolvedPath -ErrorAction Stop
-    if ($item.PSIsContainer)
+    if ($IsRemoteSession)
     {
-        Start-Process -FilePath 'explorer.exe' -ArgumentList @($ResolvedPath)
+        $cmd = "Start-Process -FilePath 'explorer.exe' -ArgumentList @(`"$ResolvedPath`")"
+        & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $cmd -Name "Explorer"
     } else
     {
-        Start-Process -FilePath 'explorer.exe' -ArgumentList @("/select,$ResolvedPath")
+        $item = Get-Item -LiteralPath $ResolvedPath -ErrorAction Stop
+        if ($item.PSIsContainer)
+        {
+            Start-Process -FilePath 'explorer.exe' -ArgumentList @($ResolvedPath)
+        } else
+        {
+            Start-Process -FilePath 'explorer.exe' -ArgumentList @("/select,$ResolvedPath")
+        }
     }
 }
 
@@ -155,6 +187,15 @@ function Open-InYazi
     } else
     { $item.DirectoryName 
     }
+    
+    # SSH + fzf mode: launch Yazi in current terminal session
+    if ($IsRemoteSession -and $fzf)
+    {
+        & $YaziExe -- "$ResolvedPath"
+        return
+    }
+    
+    # Local mode: open in new Windows Terminal tab
     $titleTarget = Split-Path -Leaf $ResolvedPath
     if ([string]::IsNullOrWhiteSpace($titleTarget))
     {
@@ -187,7 +228,7 @@ $prompt = if ($Explorer)
 } else
 { 'Path (Yazi)' 
 }
-$selection = & $WlinesWrapper -InputContent $inputContent $prompt
+$selection = & $WlinesWrapper -InputContent $inputContent -p $prompt
 
 if ([string]::IsNullOrWhiteSpace($selection))
 {

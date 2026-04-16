@@ -55,10 +55,44 @@ SAFETY FEATURES:
     return
 }
 
-$WlinesWrapper = if ($fzf) {
+$WlinesWrapper = if ($fzf)
+{
     Join-Path $PSScriptRoot 'wlines-fzf.ps1'
-} else {
+} else
+{
     Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+}
+
+# Auto-detect SSH session
+$IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
+if ($IsRemoteSession)
+{
+    Write-Host "SSH session detected - GlazeWM management will execute on local machine via pwsh-daemon"
+}
+
+function Get-SSHSourceName
+{
+    # Extract SSH connection source and format it
+    if ($env:SSH_CONNECTION)
+    {
+        # Format: "client_ip client_port server_ip server_port"
+        $parts = $env:SSH_CONNECTION -split ' '
+        if ($parts.Count -ge 1)
+        {
+            return "ssh:$($parts[0])"
+        }
+    } elseif ($env:SSH_CLIENT)
+    {
+        # Format: "client_ip client_port"
+        $parts = $env:SSH_CLIENT -split ' '
+        if ($parts.Count -ge 1)
+        {
+            return "ssh:$($parts[0])"
+        }
+    }
+    return $null
 }
 
 Add-Type @"
@@ -619,6 +653,14 @@ function Show-HiddenWindow
 }
 
 $items = @(Get-TabItems)
+
+# SSH warning
+if ($IsRemoteSession)
+{
+    $managedCount = ($items | Where-Object { $_.Managed }).Count
+    Write-Warning "SSH session detected: Can only show $managedCount GlazeWM managed windows (unmanaged windows are enumerated from remote machine)."
+}
+
 if ($items.Count -eq 0)
 {
     Write-Warning 'No windows were found.'
@@ -668,7 +710,7 @@ $actionLabel = if ($HideMode)
 { 'Focus' 
 }
 
-$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") "Select Window ($actionLabel Mode)"
+$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") -p "Select Window ($actionLabel Mode)"
 if ([string]::IsNullOrWhiteSpace($selection))
 {
     return

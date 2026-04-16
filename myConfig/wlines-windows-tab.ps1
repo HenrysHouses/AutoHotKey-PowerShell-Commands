@@ -49,10 +49,21 @@ EXAMPLES:
     return
 }
 
-$WlinesWrapper = if ($fzf) {
+$WlinesWrapper = if ($fzf)
+{
     Join-Path $PSScriptRoot 'wlines-fzf.ps1'
-} else {
+} else
+{
     Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+}
+
+# Auto-detect SSH session
+$IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
+if ($IsRemoteSession)
+{
+    Write-Host "SSH session detected - window management will execute on local machine via pwsh-daemon"
 }
 
 Add-Type @"
@@ -466,6 +477,13 @@ function Show-HiddenWindow
 }
 
 $items = @(Get-TabItems)
+
+# SSH warning
+if ($IsRemoteSession)
+{
+    Write-Warning "SSH session detected: Window enumeration returns windows from the remote machine, not your local workstation. This script does not work correctly over SSH."
+}
+
 if ($items.Count -eq 0)
 {
     Write-Warning 'No windows were found.'
@@ -476,7 +494,7 @@ if ($List)
 {
     Write-Host "=== Windows ===" -ForegroundColor Green
     $items |
-        Select-Object ProcessName, Title, WorkspaceLabel, WorkspaceShown, WindowFocused, IsHidden |
+        Select-Object Title, IsHidden, IsMinimized, IsVisible |
         Format-Table -AutoSize
     return
 }
@@ -500,7 +518,7 @@ $actionLabel = if ($HideMode)
 { 'Focus' 
 }
 
-$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") "Select Window ($actionLabel Mode)"
+$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") -p "Select Window ($actionLabel Mode)"
 if ([string]::IsNullOrWhiteSpace($selection))
 {
     return
@@ -535,16 +553,31 @@ try
             Write-Warning "Cannot hide: This is a protected window."
             return
         }
-        Hide-SelectedWindow -WindowTitle $selectedItem.Title -AllItems $items
+        
+        if ($IsRemoteSession)
+        {
+            $cmd = "[FocusHelper]::ShowWindow([IntPtr]::Zero, [FocusHelper]::SW_HIDE)"
+            & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $cmd -Name "Windows Tabs"
+        } else
+        {
+            Hide-SelectedWindow -WindowTitle $selectedItem.Title -AllItems $items
+        }
     } else
     {
         # Unmanaged window - use WinAPI to handle it
-        if ($selectedItem.IsHidden)
+        if ($IsRemoteSession)
         {
-            Show-HiddenWindow -WindowHandle $selectedItem.WindowHandle
+            $cmd = "[Win32]::SetForegroundWindow([IntPtr]::Zero)"
+            & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $cmd -Name "Windows Tabs"
         } else
         {
-            [Win32]::SetForegroundWindow($selectedItem.WindowHandle) | Out-Null
+            if ($selectedItem.IsHidden)
+            {
+                Show-HiddenWindow -WindowHandle $selectedItem.WindowHandle
+            } else
+            {
+                [Win32]::SetForegroundWindow($selectedItem.WindowHandle) | Out-Null
+            }
         }
     }
 } catch

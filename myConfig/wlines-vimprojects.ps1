@@ -7,11 +7,23 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$WlinesWrapper = if ($fzf) {
+$WlinesWrapper = if ($fzf)
+{
     Join-Path $PSScriptRoot 'wlines-fzf.ps1'
-} else {
+} else
+{
     Join-Path $PSScriptRoot 'wlines-rofi.ps1'
 }
+
+# Auto-detect SSH session
+$IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
+if ($IsRemoteSession)
+{
+    Write-Host "SSH session detected - Neovim will open in this terminal"
+}
+
 $WorkspaceDir = Join-Path $env:LOCALAPPDATA 'nvim-data\Workspaces'
 
 function ConvertTo-CmdArgument
@@ -84,6 +96,17 @@ function Open-InNeovim
     } else
     { $ResolvedPath 
     }
+    
+    # SSH mode: launch Neovim in current terminal
+    if ($IsRemoteSession)
+    {
+        Push-Location $workingDirectory
+        & nvim -- $targetArgument
+        Pop-Location
+        return
+    }
+    
+    # Local mode: open in new Windows Terminal tab
     $titleTarget = Split-Path -Leaf $ResolvedPath
     if ([string]::IsNullOrWhiteSpace($titleTarget))
     {
@@ -92,6 +115,7 @@ function Open-InNeovim
     $tabTitle = "Neovim: $titleTarget"
     $escapedTitle = Escape-CmdTitleText -Value $tabTitle
     $quotedTarget = ConvertTo-CmdArgument -Value $targetArgument
+
     $command = "title $escapedTitle & nvim -- $quotedTarget"
 
     Start-Process -FilePath 'wt.exe' -ArgumentList @(
@@ -186,7 +210,7 @@ if ($List)
     return
 }
 
-$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") 'Open Neovim'
+$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") -p 'Open Neovim'
 if ([string]::IsNullOrWhiteSpace($selection))
 {
     return

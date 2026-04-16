@@ -1,4 +1,5 @@
 param (
+    [Parameter(ValueFromPipeline)]
     [string]$InputContent,  # Captures single input from the pipeline
     [string]$p  # Captures single input from the argument
 )
@@ -13,7 +14,7 @@ $mainforeground = "#b5b5a8"
 $mainbackground = "#272822"
 $selectedforeground = "#161c0f"
 $selectedbackground = "#9beb2e"
-$textforeground = "#ffffff"
+$textforeground = $selectedforeground
 $textbackground = "#72756e"
 $font = "JetBrainsMono Nerd Font Propo"
 $fontsize = 21
@@ -24,10 +25,10 @@ $mode = "complete"
 
 if ($p)
 {
-    $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $selectedforeground -f $font -fs $fontsize -p $p 2>&1
+    $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $textforeground -f $font -fs $fontsize -p $p 2>&1
     Write-Output $output
 } else
 {
-    $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $selectedforeground -f $font -fs $fontsize 2>&1
+    $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $textforeground -f $font -fs $fontsize 2>&1
     Write-Output $output
 }

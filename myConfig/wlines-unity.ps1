@@ -4,10 +4,21 @@ param(
     [switch]$fzf
 )
 
-$WlinesWrapper = if ($fzf) {
+$WlinesWrapper = if ($fzf)
+{
     Join-Path $PSScriptRoot 'wlines-fzf.ps1'
-} else {
+} else
+{
     Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+}
+
+# Auto-detect SSH session
+$IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
+if ($IsRemoteSession)
+{
+    Write-Host "SSH session detected - Unity Editor will launch on local machine via pwsh-daemon"
 }
 
 $TARGET_DIR = "$env:USERPROFILE\repos"
@@ -34,12 +45,20 @@ if (Test-Path $TARGET_DIR)
             }
         }
     }
-    $targetProject = $WlinesWrapper -InputContent "$UNITY_PROJECTS" "Open Project"
+    $targetProject = & $WlinesWrapper -InputContent "$UNITY_PROJECTS" -p "Open Project"
         
     if (-not $targetProject -eq "")
     {
         $version = Select-String -Path $targetProject\\ProjectSettings\\ProjectVersion.txt -Pattern '(?<=m_EditorVersion: ).*' | ForEach-Object { $_.Matches.Value }
-        & "C:\Program Files\Unity\Hub\Editor\$version\Editor\Unity.exe" "-projectPath" "$targetProject"
+        $cmd = "`"C:\Program Files\Unity\Hub\Editor\$version\Editor\Unity.exe`" `"-projectPath`" `"$targetProject`""
+        
+        if ($IsRemoteSession)
+        {
+            & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command "&$cmd" -Name "Unity Launcher"
+        } else
+        {
+            & "C:\Program Files\Unity\Hub\Editor\$version\Editor\Unity.exe" "-projectPath" "$targetProject"
+        }
     }
 }
 

@@ -11,15 +11,47 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$WlinesWrapper = if ($fzf) {
+$WlinesWrapper = if ($fzf)
+{
     Join-Path $PSScriptRoot 'wlines-fzf.ps1'
-} else {
+} else
+{
     Join-Path $PSScriptRoot 'wlines-rofi.ps1'
 }
 $CurrentSessionId = (Get-Process -Id $PID).SessionId
 $DisplayLimit = 240
 $LogDir = Join-Path $env:LOCALAPPDATA 'wlines'
 $LogPath = Join-Path $LogDir 'wlines-close.log'
+
+# Auto-detect remote session (SSH, etc.)
+$IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
+    -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
+$SkipSessionIdCheck = $IsRemoteSession
+
+function Get-SSHSourceName
+{
+    # Extract SSH connection source and format it
+    if ($env:SSH_CONNECTION)
+    {
+        # Format: "client_ip client_port server_ip server_port"
+        $parts = $env:SSH_CONNECTION -split ' '
+        if ($parts.Count -ge 1)
+        {
+            return "ssh:$($parts[0])"
+        }
+    } elseif ($env:SSH_CLIENT)
+    {
+        # Format: "client_ip client_port"
+        $parts = $env:SSH_CLIENT -split ' '
+        if ($parts.Count -ge 1)
+        {
+            return "ssh:$($parts[0])"
+        }
+    }
+    return $null
+}
+
 $ExcludedProcessIds = [System.Collections.Generic.HashSet[int]]::new()
 [string[]]$IgnoredProcessNames = @(
     'ApplicationFrameHost',
@@ -246,7 +278,7 @@ function Get-RunningApplicationItems
             }
 
             $process = $processMap[$processId]
-            if ($process.SessionId -ne $CurrentSessionId)
+            if (-not $SkipSessionIdCheck -and $process.SessionId -ne $CurrentSessionId)
             {
                 continue
             }
@@ -364,7 +396,7 @@ function Get-RunningProcessItems
                 continue
             }
 
-            if ($process.SessionId -ne $CurrentSessionId)
+            if (-not $SkipSessionIdCheck -and $process.SessionId -ne $CurrentSessionId)
             {
                 continue
             }
@@ -451,13 +483,22 @@ function Get-RunningProcessItems
     return $sortedItems
 }
 
-Write-LauncherLog "Starting wlines-close (force=$Force)"
+Write-LauncherLog "Starting wlines-close (force=$Force, remote=$IsRemoteSession)"
+
+# SSH sessions can't enumerate GUI windows, force process mode
+if ($IsRemoteSession -and -not $Force)
+{
+    Write-LauncherLog 'Remote session detected, switching to force mode (process-based)'
+    $Force = $true
+}
+
 $items = if ($Force)
 { @(Get-RunningProcessItems) 
 } else
 { @(Get-RunningApplicationItems) 
 }
-if ($items.Count -eq 0)
+$itemCount = @($items).Count
+if ($itemCount -eq 0)
 {
     Write-LauncherLog 'No running applications were found in the current session'
     Write-Warning 'No running applications were found in the current session.'
@@ -474,13 +515,13 @@ if ($List)
 }
 
 $pickerInput = $items.Label -join "`n"
-Write-LauncherLog "Launching wlines with $($items.Count) entries"
+Write-LauncherLog "Launching wlines with $itemCount entries"
 $prompt = if ($Force)
 { 'Kill process' 
 } else
 { 'Close window' 
 }
-$selection = & $WlinesWrapper -InputContent $pickerInput $prompt
+$selection = & $WlinesWrapper -InputContent $pickerInput -p $prompt
 Write-LauncherLog "wlines returned: '$selection'"
 if ([string]::IsNullOrWhiteSpace($selection))
 {
