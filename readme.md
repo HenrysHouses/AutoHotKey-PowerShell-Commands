@@ -1,4 +1,4 @@
-# Features
+j# Features
 
 - pwsh-pipe-daemon.ps1
     Creates powershell instances to run commands without any additional overhead from windows API.
@@ -35,7 +35,7 @@ Once installed, keep the two scripts running and that's it
 Optional step: add the pwsh-pipe-daemon script to your shell's path environment variable
 
 
-My config info:
+# My confi
 
 Dependencies:
 
