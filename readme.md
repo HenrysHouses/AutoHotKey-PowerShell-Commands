@@ -1,4 +1,4 @@
-j# Features
+# Features
 
 - pwsh-pipe-daemon.ps1
     Creates powershell instances to run commands without any additional overhead from windows API.
