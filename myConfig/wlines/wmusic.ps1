@@ -10,10 +10,10 @@ $ErrorActionPreference = 'Stop'
 
 $WlinesWrapper = if ($fzf)
 {
-    Join-Path $PSScriptRoot 'wlines-fzf.ps1'
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 } else
 {
-    Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+    Join-Path $PSScriptRoot 'wrofi.ps1'
 }
 
 if (-not ([System.Management.Automation.PSTypeName]'YouTubeMusic').Type)

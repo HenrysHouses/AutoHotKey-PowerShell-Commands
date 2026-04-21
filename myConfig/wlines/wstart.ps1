@@ -10,10 +10,10 @@ $ErrorActionPreference = 'Stop'
 
 $WlinesWrapper = if ($fzf)
 {
-    Join-Path $PSScriptRoot 'wlines-fzf.ps1'
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 } else
 {
-    Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+    Join-Path $PSScriptRoot 'wrofi.ps1'
 }
 
 # Auto-detect SSH session
@@ -32,7 +32,7 @@ function Invoke-RemoteCommand
     if ($IsRemoteSession)
     {
         # Send to daemon for remote execution (pwsh-msg handles SSH detection)
-        & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $Command -Name "Start"
+        & (Join-Path $PSScriptRoot '..\..\pwsh-msg.ps1') -Command $Command -Name "Start"
     } else
     {
         # Execute locally

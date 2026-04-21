@@ -6,10 +6,10 @@ param(
 
 $WlinesWrapper = if ($fzf)
 {
-    Join-Path $PSScriptRoot 'wlines-fzf.ps1'
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 } else
 {
-    Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+    Join-Path $PSScriptRoot 'wrofi.ps1'
 }
 
 # Auto-detect SSH session
@@ -54,7 +54,7 @@ if (Test-Path $TARGET_DIR)
         
         if ($IsRemoteSession)
         {
-            & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command "&$cmd" -Name "Unity Launcher"
+            & (Join-Path $PSScriptRoot '..\..\pwsh-msg.ps1') -Command "&$cmd" -Name "Unity Launcher"
         } else
         {
             & "C:\Program Files\Unity\Hub\Editor\$version\Editor\Unity.exe" "-projectPath" "$targetProject"

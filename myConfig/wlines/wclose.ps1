@@ -13,15 +13,15 @@ $ErrorActionPreference = 'Stop'
 
 $WlinesWrapper = if ($fzf)
 {
-    Join-Path $PSScriptRoot 'wlines-fzf.ps1'
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 } else
 {
-    Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+    Join-Path $PSScriptRoot 'wrofi.ps1'
 }
 $CurrentSessionId = (Get-Process -Id $PID).SessionId
 $DisplayLimit = 240
 $LogDir = Join-Path $env:LOCALAPPDATA 'wlines'
-$LogPath = Join-Path $LogDir 'wlines-close.log'
+$LogPath = Join-Path $LogDir 'wclose.log'
 
 # Auto-detect remote session (SSH, etc.)
 $IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
@@ -483,7 +483,7 @@ function Get-RunningProcessItems
     return $sortedItems
 }
 
-Write-LauncherLog "Starting wlines-close (force=$Force, remote=$IsRemoteSession)"
+Write-LauncherLog "Starting wclose (force=$Force, remote=$IsRemoteSession)"
 
 # SSH sessions can't enumerate GUI windows, force process mode
 if ($IsRemoteSession -and -not $Force)

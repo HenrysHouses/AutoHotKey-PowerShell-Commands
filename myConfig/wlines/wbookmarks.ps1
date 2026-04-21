@@ -56,8 +56,8 @@ if ($List.Count -eq 0) {
     return
 }
 
-# Call wlines-rofi.ps1
-$WlinesWrapper = Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+# Call wrofi.ps1
+$WlinesWrapper = Join-Path $PSScriptRoot 'wrofi.ps1'
 $Selection = $List -join "`n" | & $WlinesWrapper -p "Bookmarks:"
 
 if ([string]::IsNullOrWhiteSpace($Selection)) {

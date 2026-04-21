@@ -9,10 +9,10 @@ $ErrorActionPreference = 'Stop'
 
 $WlinesWrapper = if ($fzf)
 {
-    Join-Path $PSScriptRoot 'wlines-fzf.ps1'
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 } else
 {
-    Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+    Join-Path $PSScriptRoot 'wrofi.ps1'
 }
 
 # Auto-detect SSH session
@@ -31,7 +31,7 @@ function Invoke-RemoteCommand
     if ($IsRemoteSession)
     {
         # pwsh-msg.ps1 handles SSH detection automatically
-        & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $Command -Name "Explorer"
+        & (Join-Path $PSScriptRoot '..\..\pwsh-msg.ps1') -Command $Command -Name "Explorer"
     } else
     {
         Invoke-Expression $Command
@@ -163,7 +163,7 @@ function Open-InExplorer
     if ($IsRemoteSession)
     {
         $cmd = "Start-Process -FilePath 'explorer.exe' -ArgumentList @(`"$ResolvedPath`")"
-        & (Join-Path $PSScriptRoot 'pwsh-msg.ps1') -Command $cmd -Name "Explorer"
+        & (Join-Path $PSScriptRoot '..\..\pwsh-msg.ps1') -Command $cmd -Name "Explorer"
     } else
     {
         $item = Get-Item -LiteralPath $ResolvedPath -ErrorAction Stop

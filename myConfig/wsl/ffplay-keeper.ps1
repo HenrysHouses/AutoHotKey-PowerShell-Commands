@@ -1,4 +1,4 @@
-# wlines-ffplay-keeper.ps1 - Persistent watchdog for ffplay stream
+# wffplay-keeper.ps1 - Persistent watchdog for ffplay stream
 $StreamURL = "http://127.0.0.1:8000"
 
 Write-Host "[KEEPER] Initializing ffplay watchdog..."

@@ -1,7 +1,7 @@
 param (
     [Parameter(ValueFromPipeline)]
     [string]$InputContent,  # Captures single input from the pipeline
-    [string]$p              # Captures single input from the argument (matches wlines-rofi.ps1)
+    [string]$p              # Captures single input from the argument (matches wrofi.ps1)
 )
 
 # Capture pipeline input if it's provided
@@ -12,8 +12,7 @@ if ($InputContent -eq $null)
 
 $fzfArgs = @(
     '--multi',
-    '--cycle',
-    '--height=50%'
+    '--cycle'
 )
 
 if ($p)

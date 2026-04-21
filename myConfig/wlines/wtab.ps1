@@ -12,14 +12,14 @@ $ErrorActionPreference = 'Stop'
 if ($Help)
 {
     Write-Host @"
-Wlines Glaze Tab - Window manager integration for GlazeWM
+Wlines Window Tab - Window management intergration for wlines
 
 USAGE:
-    wlines-glazewm-tab.ps1 [OPTIONS]
+    wtab.ps1 [OPTIONS]
 
 OPTIONS:
-    -List           List all available windows (managed and unmanaged)
-    -Hide <title>   Hide a window by title (removes from GlazeWM if managed)
+    -List           List all available windows (regular and hidden)
+    -Hide <title>   Hide a window by title
                     Examples:
                     -Hide "Discord"
                     -Hide "Zen Browser"
@@ -35,32 +35,26 @@ INTERACTIVE MODE:
 
 EXAMPLES:
     # Interactive mode - Focus selected window (default)
-    .\wlines-glazewm-tab.ps1
+    .\wtab.ps1
 
     # Interactive mode - Hide selected window
-    .\wlines-glazewm-tab.ps1 -HideMode
+    .\wtab.ps1 -HideMode
 
     # List all windows
-    .\wlines-glazewm-tab.ps1 -List
+    .\wtab.ps1 -List
 
     # Hide a window directly
-    .\wlines-glazewm-tab.ps1 -Hide "Discord"
-
-SAFETY FEATURES:
-    - Cannot hide the Wlines Glaze Tab script itself
-    - Cannot hide the Wlines Start Menu
-    - Managed windows are properly closed via GlazeWM
-    - Unmanaged windows are hidden using Windows APIs
+    .\wtab.ps1 -Hide "Discord"
 "@
     return
 }
 
 $WlinesWrapper = if ($fzf)
 {
-    Join-Path $PSScriptRoot 'wlines-fzf.ps1'
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 } else
 {
-    Join-Path $PSScriptRoot 'wlines-rofi.ps1'
+    Join-Path $PSScriptRoot 'wrofi.ps1'
 }
 
 # Auto-detect SSH session
@@ -69,30 +63,7 @@ $IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
     -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
 if ($IsRemoteSession)
 {
-    Write-Host "SSH session detected - GlazeWM management will execute on local machine via pwsh-daemon"
-}
-
-function Get-SSHSourceName
-{
-    # Extract SSH connection source and format it
-    if ($env:SSH_CONNECTION)
-    {
-        # Format: "client_ip client_port server_ip server_port"
-        $parts = $env:SSH_CONNECTION -split ' '
-        if ($parts.Count -ge 1)
-        {
-            return "ssh:$($parts[0])"
-        }
-    } elseif ($env:SSH_CLIENT)
-    {
-        # Format: "client_ip client_port"
-        $parts = $env:SSH_CLIENT -split ' '
-        if ($parts.Count -ge 1)
-        {
-            return "ssh:$($parts[0])"
-        }
-    }
-    return $null
+    Write-Host "SSH session detected - window management will execute on local machine via pwsh-daemon"
 }
 
 Add-Type @"
@@ -107,7 +78,7 @@ public class WinEnum {
     [DllImport("user32.dll")]
     public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
 
     [DllImport("user32.dll")]
@@ -140,29 +111,36 @@ public class WinEnum {
         public int bottom;
     }
 
+    [DllImport("user32.dll")]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
     public static List<WindowInfo> GetAllWindowsStatic()
     {
         var windows = new List<WindowInfo>();
         EnumWindowsProc callback = (hWnd, lParam) =>
         {
-            StringBuilder sb = new StringBuilder(256);
-            GetWindowText(hWnd, sb, sb.Capacity);
-            string title = sb.ToString();
-
-            if (!string.IsNullOrWhiteSpace(title))
+            int length = GetWindowTextLength(hWnd);
+            if (length > 0)
             {
-                RECT rect;
-                GetWindowRect(hWnd, out rect);
+                StringBuilder sb = new StringBuilder(length + 1);
+                GetWindowText(hWnd, sb, sb.Capacity);
+                string title = sb.ToString();
 
-                windows.Add(new WindowInfo
+                if (!string.IsNullOrWhiteSpace(title))
                 {
-                    Handle = hWnd,
-                    Title = title,
-                    IsVisible = IsWindowVisible(hWnd),
-                    IsMinimized = IsIconic(hWnd),
-                    X = rect.left,
-                    Y = rect.top
-                });
+                    RECT rect;
+                    GetWindowRect(hWnd, out rect);
+
+                    windows.Add(new WindowInfo
+                    {
+                        Handle = hWnd,
+                        Title = title,
+                        IsVisible = IsWindowVisible(hWnd),
+                        IsMinimized = IsIconic(hWnd),
+                        X = rect.left,
+                        Y = rect.top
+                    });
+                }
             }
             return true;
         };
@@ -194,7 +172,7 @@ public class Win32 {
     [DllImport("user32.dll")]
     public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
 
     [DllImport("user32.dll")]
@@ -275,11 +253,8 @@ function Get-AllWindows
     return $results
 }
 
-function Get-UnmanagedWindows
+function Get-Windows
 {
-    param($GlazeWindows, $GlazeWorkspaces)
-
-    $glazeTitles = $GlazeWindows | ForEach-Object { $_.title }
     $allWindows = Get-AllWindows
     $results = @()
 
@@ -306,12 +281,12 @@ function Get-UnmanagedWindows
 
     # Ignored windows list
     $ignoredPatterns = @(
-        'Untitled',
-        'CrossDeviceResumeWindow',
-        'Windows Default Lock Screen',
-        '\.ahk - AutoHotkey',
         '^yasb$', '^YasbBar$',
-        'Buttery Taskbar'
+        '\.ahk - AutoHotkey',
+        'Buttery Taskbar',
+        'CrossDeviceResume',
+        'Untitled',
+        'Windows Default Lock Screen'
     )
 
     foreach ($window in $allWindows)
@@ -369,39 +344,16 @@ function Get-UnmanagedWindows
 
         $results += [PSCustomObject]@{
             ItemId          = ''
-            Label           = "Unmanaged | $($window.Title)$statusStr"
+            Label           = "$($window.Title)$statusStr"
             WindowHandle    = $window.Handle
-            Managed         = $false
             IsHidden        = (-not $window.IsVisible) -or $window.IsMinimized
             IsMinimized     = $window.IsMinimized
             IsVisible       = $window.IsVisible
             Title           = $window.Title
-            Workspaces     = $GlazeWorkspaces
         }
     }
 
     return $results
-}
-
-function Get-GlazeState
-{
-    $workspaceResponse = glazewm query workspaces | ConvertFrom-Json
-    $windowResponse = glazewm query windows | ConvertFrom-Json
-
-    if (-not $workspaceResponse.success)
-    {
-        throw 'Failed to query GlazeWM workspaces.'
-    }
-
-    if (-not $windowResponse.success)
-    {
-        throw 'Failed to query GlazeWM windows.'
-    }
-
-    return [PSCustomObject]@{
-        Workspaces = @($workspaceResponse.data.workspaces)
-        Windows    = @($windowResponse.data.windows)
-    }
 }
 
 function Resolve-WorkspaceForWindow
@@ -466,92 +418,13 @@ function Get-WorkspaceForUnmanagedWindow
 
 function Get-TabItems
 {
-    $state = Get-GlazeState
-    $workspaceMap = @{}
-    foreach ($workspace in $state.Workspaces)
-    {
-        $workspaceMap[$workspace.id] = $workspace
-    }
-
-    $items = foreach ($window in $state.Windows)
-    {
-        $workspace = Resolve-WorkspaceForWindow `
-            -Window $window `
-            -Workspaces $state.Workspaces `
-            -Windows $state.Windows
-
-        if ($null -eq $workspace)
-        {
-            continue
-        }
-        $workspaceLabel = if ([string]::IsNullOrWhiteSpace($workspace.displayName))
-        {
-            $workspace.name
-        } else
-        {
-            $workspace.displayName
-        }
-
-        $parts = @($window.processName)
-        if (-not [string]::IsNullOrWhiteSpace($window.title))
-        {
-            $parts += $window.title
-        }
-        $parts += "Workspace $workspaceLabel"
-
-        if (-not $workspace.isDisplayed)
-        {
-            $parts += 'Hidden Workspace'
-        }
-
-        if ($window.hasFocus)
-        {
-            $parts += 'Focused'
-        }
-
-        if ($window.state.type -eq 'minimized')
-        {
-            $parts += 'Minimized'
-        }
-
-        [PSCustomObject]@{
-            ItemId          = ''
-            Label           = ($parts -join ' | ')
-            WindowId        = $window.id
-            Title           = $window.title
-            ProcessName     = $window.processName
-            WorkspaceId     = $workspace.id
-            WorkspaceName   = $workspace.name
-            WorkspaceLabel  = $workspaceLabel
-            WorkspaceShown  = [bool]$workspace.isDisplayed
-            WindowFocused   = [bool]$window.hasFocus
-            WindowMinimized = ($window.state.type -eq 'minimized')
-            Managed         = $true
-            WindowHandle    = $null
-            IsHidden        = $false
-        }
-    }
-
-    $items = @($items | Sort-Object ProcessName, Title, WorkspaceName)
+    $items = Get-Windows -GlazeWindows $state.Windows -GlazeWorkspaces $state.Workspaces
+    # Add item IDs for unmanaged windows
     for ($index = 0; $index -lt $items.Count; $index++)
     {
         $itemId = '{0:D4}' -f ($index + 1)
         $items[$index].ItemId = $itemId
         $items[$index].Label = "$($items[$index].Label) | [${itemId}]"
-    }
-
-    # Add unmanaged windows (including hidden ones)
-    $unmanaged = Get-UnmanagedWindows -GlazeWindows $state.Windows -GlazeWorkspaces $state.Workspaces
-    $items += $unmanaged
-
-    # Add item IDs for unmanaged windows
-    $managedCount = ($items | Where-Object { $_.Managed }).Count
-    $unmanagedItems = $items | Where-Object { -not $_.Managed }
-    for ($index = 0; $index -lt $unmanagedItems.Count; $index++)
-    {
-        $itemId = '{0:D4}' -f ($managedCount + $index + 1)
-        $unmanagedItems[$index].ItemId = $itemId
-        $unmanagedItems[$index].Label = "$($unmanagedItems[$index].Label) | [${itemId}]"
     }
 
     return $items
@@ -561,20 +434,8 @@ function Hide-SelectedWindow
 {
     param(
         [Parameter(Mandatory)]$WindowTitle,
-        [Parameter(Mandatory)]$AllItems,
-        [Parameter(Mandatory)]$State
+        [Parameter(Mandatory)]$AllItems
     )
-
-    # Safety check: don't hide ourselves
-    $selfTitles = @('Wlines Glaze Tab', 'Wlines Start Menu')
-    foreach ($selfTitle in $selfTitles)
-    {
-        if ($WindowTitle -eq $selfTitle)
-        {
-            Write-Warning "Cannot hide: This is the current script window."
-            return $false
-        }
-    }
 
     # Find the window by title
     $window = $AllItems | Where-Object { $_.Title -eq $WindowTitle } | Select-Object -First 1
@@ -587,20 +448,9 @@ function Hide-SelectedWindow
 
     try
     {
-        if ($window.Managed)
-        {
-            # For managed windows, focus it then close it via GlazeWM
-            Write-Host "Closing managed window from GlazeWM: $($window.Title)"
-            glazewm command focus --container-id $window.WindowId | Out-Null
-            Start-Sleep -Milliseconds 300
-            glazewm command close | Out-Null
-            Start-Sleep -Milliseconds 500
-        } else
-        {
-            # Hide unmanaged window using WinAPI
-            Write-Host "Hiding unmanaged window: $($window.Title)"
-            [FocusHelper]::ShowWindow($window.WindowHandle, [FocusHelper]::SW_HIDE) | Out-Null
-        }
+        # Hide window using WinAPI
+        Write-Host "Hiding unmanaged window: $($window.Title)"
+        [FocusHelper]::ShowWindow($window.WindowHandle, [FocusHelper]::SW_HIDE) | Out-Null
 
         Write-Host "Window hidden successfully." -ForegroundColor Green
         return $true
@@ -614,30 +464,11 @@ function Hide-SelectedWindow
 function Show-HiddenWindow
 {
     param(
-        [IntPtr]$WindowHandle,
-        $Workspaces
+        [IntPtr]$WindowHandle
     )
 
     try
     {
-        # Determine which workspace the window belongs to and focus it if needed
-        if ($Workspaces -and $Workspaces.Count -gt 0)
-        {
-            $displayedWorkspace = $Workspaces | Where-Object { $_.isDisplayed } | Select-Object -First 1
-            if ($displayedWorkspace)
-            {
-                # Focus the workspace if it's not already displayed
-                if (-not $displayedWorkspace.isDisplayed)
-                {
-                    glazewm command focus --workspace $displayedWorkspace.name | Out-Null
-                }
-            } else
-            {
-                # Fallback: focus the first workspace
-                glazewm command focus --workspace $Workspaces[0].name | Out-Null
-            }
-        }
-
         # Show the window
         [FocusHelper]::ShowWindow($WindowHandle, [FocusHelper]::SW_RESTORE) | Out-Null
         
@@ -657,8 +488,7 @@ $items = @(Get-TabItems)
 # SSH warning
 if ($IsRemoteSession)
 {
-    $managedCount = ($items | Where-Object { $_.Managed }).Count
-    Write-Warning "SSH session detected: Can only show $managedCount GlazeWM managed windows (unmanaged windows are enumerated from remote machine)."
+    Write-Warning "SSH session detected: Window enumeration returns windows from the remote machine, not your local workstation. This script does not work correctly over SSH."
 }
 
 if ($items.Count -eq 0)
@@ -669,32 +499,17 @@ if ($items.Count -eq 0)
 
 if ($List)
 {
-    $managedItems = $items | Where-Object { $_.Managed }
-    $unmanagedItems = $items | Where-Object { -not $_.Managed }
-    
-    if ($managedItems)
-    {
-        Write-Host "=== GlazeWM Managed Windows ===" -ForegroundColor Green
-        $managedItems |
-            Select-Object ProcessName, Title, WorkspaceLabel, WorkspaceShown, WindowFocused, IsHidden |
-            Format-Table -AutoSize
-    }
-    
-    if ($unmanagedItems)
-    {
-        Write-Host "`n=== Unmanaged Windows ===" -ForegroundColor Yellow
-        $unmanagedItems |
-            Select-Object Title, IsHidden |
-            Format-Table -AutoSize
-    }
+    Write-Host "=== Windows ===" -ForegroundColor Green
+    $items |
+        Select-Object Title, IsHidden, IsMinimized, IsVisible |
+        Format-Table -AutoSize
     return
 }
 
 # Handle -Hide parameter
 if (-not [string]::IsNullOrWhiteSpace($Hide))
 {
-    $state = Get-GlazeState
-    Hide-SelectedWindow -WindowTitle $Hide -AllItems $items -State $state
+    Hide-SelectedWindow -WindowTitle $Hide -AllItems $items
     return
 }
 
@@ -745,40 +560,29 @@ try
             Write-Warning "Cannot hide: This is a protected window."
             return
         }
-        Hide-SelectedWindow -WindowTitle $selectedItem.Title -AllItems $items -State (Get-GlazeState)
-    } else
-    {
-        # Focus action (default)
-        if ($selectedItem.Managed)
+        
+        if ($IsRemoteSession)
         {
-            if (-not $selectedItem.WorkspaceShown)
-            {
-                glazewm command focus --workspace $selectedItem.WorkspaceName | Out-Null
-            }
-
-            if ($selectedItem.WindowMinimized)
-            {
-                glazewm command --id $selectedItem.WindowId toggle-minimized | Out-Null
-            }
-
-            glazewm command focus --container-id $selectedItem.WindowId | Out-Null
+            $cmd = "[FocusHelper]::ShowWindow([IntPtr]::Zero, [FocusHelper]::SW_HIDE)"
+            & (Join-Path $PSScriptRoot '..\..\pwsh-msg.ps1') -Command $cmd -Name "Windows Tabs"
         } else
         {
-            # Unmanaged window - use WinAPI to handle it
+            Hide-SelectedWindow -WindowTitle $selectedItem.Title -AllItems $items
+        }
+    } else
+    {
+        # Unmanaged window - use WinAPI to handle it
+        if ($IsRemoteSession)
+        {
+            $cmd = "[Win32]::SetForegroundWindow([IntPtr]::Zero)"
+            & (Join-Path $PSScriptRoot '..\..\pwsh-msg.ps1') -Command $cmd -Name "Windows Tabs"
+        } else
+        {
             if ($selectedItem.IsHidden)
             {
-                Show-HiddenWindow -WindowHandle $selectedItem.WindowHandle -Workspaces $selectedItem.Workspaces
+                Show-HiddenWindow -WindowHandle $selectedItem.WindowHandle
             } else
             {
-                # Focus the workspace first, then set window to foreground
-                if ($selectedItem.Workspaces -and $selectedItem.Workspaces.Count -gt 0)
-                {
-                    $displayedWorkspace = $selectedItem.Workspaces | Where-Object { $_.isDisplayed } | Select-Object -First 1
-                    if ($displayedWorkspace -and -not $displayedWorkspace.isDisplayed)
-                    {
-                        glazewm command focus --workspace $displayedWorkspace.name | Out-Null
-                    }
-                }
                 [Win32]::SetForegroundWindow($selectedItem.WindowHandle) | Out-Null
             }
         }

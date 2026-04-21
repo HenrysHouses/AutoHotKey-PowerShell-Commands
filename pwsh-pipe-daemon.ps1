@@ -351,11 +351,9 @@ function IdleUpdate
     {
         $time = [DateTime]::UtcNow
         $timeFormatted = $time.ToString("HH:mm:ss.fff")
-        $startedTime = [DateTime]::ParseExact($activeCommands[$cmd].StartTime, "HH:mm:ss.fff", $null)
+        $startedTime = $activeCommands[$cmd].StartTime
         $duration = $time - $startedTime
-        $durationFormatted = $duration.ToString("hh\:mm\:ss\.fff")
         $durationString = Format-Duration $duration
-
         $instanceID = $activeCommands[$cmd].PowerShell.InstanceId
         $results = $activeCommands[$cmd].PowerShell.EndInvoke($activeCommands[$cmd].AsyncResult)
         if ($results)
@@ -474,9 +472,9 @@ function Get-PowerShellInstance
 function Format-Duration([TimeSpan]$ts)
 {
     $parts = @()
+    $totalHours = [int]($ts.TotalHours)
     if ($ts.Hours -gt 0 -or $ts.Days -gt 0)
     {
-        $totalHours = [int]($ts.TotalHours)
         $parts += "$totalHours`h"
     }
     if ($ts.Minutes -gt 0 -or $totalHours -gt 0)
@@ -529,7 +527,7 @@ function InvokeMessage
     $activeCommands[$msg] = @{
         PowerShell = $powershell
         AsyncResult = $asyncResult
-        StartTime = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
+        StartTime = [DateTime]::UtcNow
     }
                             
     # Update temp file with new active command
@@ -614,6 +612,7 @@ try
                     
                     # Extract sender name if present (before cleaning control characters)
                     $senderName = $null
+                    $isRestart = $false
 
                     $pattern = '^(?:__FROM__:([^\r\n]+)[\r\n]+)?(?:__RESTART__:(?:\r?\n)?([\s\S]+)|([\s\S]+))$'
 
@@ -625,7 +624,7 @@ try
 
                         if ($matches[2])
                         {
-                            $restart = '__RESTART__:'
+                            $isRestart = $true
                             $rawMessage = $matches[2]
                         } else
                         {
@@ -652,9 +651,8 @@ try
                         {
                             $time = [DateTime]::UtcNow
                             $timeFormatted = $time.ToString("HH:mm:ss.fff")
-                            $startedTime = [DateTime]::ParseExact($activeCommands[$message].StartTime, "HH:mm:ss.fff", $null)
+                            $startedTime = $activeCommands[$message].StartTime
                             $duration = $time - $startedTime
-                            $durationFormatted = $duration.ToString("hh\:mm\:ss\.fff")
                             $durationString = Format-Duration $duration
 
                             Write-Host "$timeFormatted - [ACTION] Cancelled Invocation: $message, duration: $durationString" -ForegroundColor DarkYellow
@@ -666,7 +664,7 @@ try
 
                             UpdateDaemonTempFile
 
-                            if ($restart -ne "")
+                            if ($isRestart)
                             {
                                 if ($powerShellInstances[$cancelledPs].IsDirty)
                                 {

@@ -8,57 +8,57 @@ OnExit(KillConnection)
 ; --- Keybinds ---
 
 ^Space:: {
-	content := "__FROM__:AutoHotKeys`nwlines-start"
+	content := "__FROM__:AutoHotKeys`nwstart"
 	PipeWrite(content, pipeName)
 }
 
 ^!k:: {
-	content := "__FROM__:AutoHotKeys`nwlines-close"
+	content := "__FROM__:AutoHotKeys`nwclose"
 	PipeWrite(content, pipeName)
 }
 
 ^!+k:: {
-	content := "__FROM__:AutoHotKeys`nwlines-close -force"
+	content := "__FROM__:AutoHotKeys`nwclose -force"
 	PipeWrite(content, pipeName)
 }
 
 !Tab:: {
-	content := "__FROM__:AutoHotKeys`nwlines-glazewm-tab"
+	content := "__FROM__:AutoHotKeys`nwglazetab"
 	PipeWrite(content, pipeName)
 }
 
 ^!Tab:: {
-	content := "__FROM__:AutoHotKeys`nwlines-glazewm-tab -HideMode"
+	content := "__FROM__:AutoHotKeys`nwglazetab -HideMode"
 	PipeWrite(content, pipeName)
 }
 
 ^!o:: {
-	content := "__FROM__:AutoHotKeys`nwlines-path"
+	content := "__FROM__:AutoHotKeys`nwpath"
 	PipeWrite(content, pipeName)
 }
 
 ^!+o:: {
-	content := "__FROM__:AutoHotKeys`nwlines-path -Explorer"
+	content := "__FROM__:AutoHotKeys`nwpath -Explorer"
 	PipeWrite(content, pipeName)
 }
 
 ^!u:: {
-	content := "__FROM__:AutoHotKeys`nwlines-unity"
+	content := "__FROM__:AutoHotKeys`nwunity"
 	PipeWrite(content, pipeName)
 }
 
 ^!p:: {
-	content := "__FROM__:AutoHotKeys`nwlines-vimprojects"
+	content := "__FROM__:AutoHotKeys`nwvimpro"
 	PipeWrite(content, pipeName)
 }
 
 ^!m:: {
-	content := "__FROM__:AutoHotKeys`nwlines-rmpccontrol"
+	content := "__FROM__:AutoHotKeys`nwrmpc"
 	PipeWrite(content, pipeName)
 }
 
 ^!b:: {
-	content := "__FROM__:AutoHotKeys`nwlines-bookmarks"
+	content := "__FROM__:AutoHotKeys`nwbookmarks"
 	PipeWrite(content, pipeName)
 }
 
