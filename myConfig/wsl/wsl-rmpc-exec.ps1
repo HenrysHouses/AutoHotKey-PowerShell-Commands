@@ -69,7 +69,7 @@ function Start-MPDIfNeeded
 # Function to launch ffplay with stream URL via keeper watchdog
 function Start-ffplayStream
 {
-    pwsh-msg -Command ". 'C:\Users\Henri\bin\ffplay-keeper.ps1'" -Restart -Name "Rmpc WSL" -PipeName "PWSH_COMMAND_PIPE"
+    pwsh-msg -Command "ffplay-keeper" -Restart -Name "Rmpc WSL" -PipeName "PWSH_COMMAND_PIPE"
 }
 
 # Detect if this is a play command and launch ffplay

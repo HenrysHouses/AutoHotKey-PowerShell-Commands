@@ -905,7 +905,7 @@ systemctl --user restart mpd && echo "MPD restarted successfully" || echo "Faile
 
 function Invoke-RestartFfplay
 {
-    pwsh-msg -Command ". ffplay-keeper" -Restart -Name "Rmpc Control" -PipeName "PWSH_COMMAND_PIPE"
+    pwsh-msg -Command "ffplay-keeper" -Restart -Name "Rmpc Control" -PipeName "PWSH_COMMAND_PIPE"
 }
 
 # Main execution
