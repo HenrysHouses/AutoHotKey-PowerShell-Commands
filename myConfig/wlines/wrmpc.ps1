@@ -167,8 +167,7 @@ function Format-RmpcCommand
     if ($RmpcCmd -match "rmpc" -and $RmpcCmd -notmatch "\s-c\s")
     {
         $RmpcCmd = $RmpcCmd -replace "rmpc(\s|$)", "rmpc -c $script:RmpcConfigFile`$1"
-    }
-    return $RmpcCmd
+    } return $RmpcCmd
 }
 
 # Execute command - routes through SSH if detected, otherwise direct to WSL
@@ -189,10 +188,10 @@ function Invoke-RmpcCommand
     if ($script:IsSSH)
     {
         Write-Log "Routing via SSH message queue: $displayCmd" "INFO"
-        & "$PSScriptRoot/../../pwsh-msg.ps1" -Command ". '$PSScriptRoot/../../wsl-rmpc-exec.ps1' -Command `"$formattedCmd`"" -Name "Rmpc Control"
+        & pwsh-msg -Command "wsl-rmpc-exec -Command `"$formattedCmd`"" -Name "Rmpc Control"
     } else
     {
-        & "$PSScriptRoot/../../wsl-rmpc-exec.ps1" -Command $formattedCmd
+        & wsl-rmpc-exec -Command $formattedCmd
     }
 }
 
@@ -353,7 +352,7 @@ function Get-LocalSongSelection
     # Use a here-string to avoid complex escaping, passed as literal string
     $findCmd = 'find /mnt/CachyOs/@home/roockert/Music -type f -name "*.m4a" 2>/dev/null | awk -F/ ''{songname = $NF; gsub(/\.m4a$/, "", songname); printf "%s ::ARTIST:: %s ::ALBUM:: %s\n", songname, $(NF-2), $(NF-1)}'' | sort'
     
-    $songList = & "$PSScriptRoot/../../wsl-rmpc-exec.ps1" -Command $findCmd
+    $songList = & wsl-rmpc-exec.ps1 -Command $findCmd
     
     if ([string]::IsNullOrEmpty($songList))
     {
@@ -438,7 +437,7 @@ function Save-YouTubeToHistory
     $historyFile = "/mnt/CachyOs/@home/roockert/.cache/rmpc/rmpc_youtube_history"
     $saveCmd = "echo `"$entry`" >> `"$historyFile`""
     
-    & "$PSScriptRoot/../../wsl-rmpc-exec.ps1" -Command $saveCmd | Out-Null
+    & wsl-rmpc-exec -Command $saveCmd | Out-Null
 }
 
 # Get YouTube link from user
@@ -449,7 +448,7 @@ function Get-YouTubeLink
     # Write-Log "Requesting YouTube link" "INFO"
     
     # Check for history
-    $history = & "$PSScriptRoot/../../wsl-rmpc-exec.ps1" -Command "test -f $script:YouTubeHistoryFile && cat $script:YouTubeHistoryFile || echo ''"
+    $history = & wsl-rmpc-exec -Command "test -f $script:YouTubeHistoryFile && cat $script:YouTubeHistoryFile || echo ''"
     
     if (-not [string]::IsNullOrEmpty($history))
     {
@@ -540,7 +539,7 @@ function Get-VolumeSelection
 {
     # Write-Log "Requesting volume level" "INFO"
     
-    $currentVolume = & "$PSScriptRoot/../../wsl-rmpc-exec.ps1" -Command "rmpc -c $script:RmpcConfigFile volume"
+    $currentVolume = & wsl-rmpc-exec -Command "rmpc -c $script:RmpcConfigFile volume"
     
     $volume = Get-Selection "" "Set Volume (current: $currentVolume%)"
     
@@ -555,7 +554,7 @@ function Get-SearchQuery
     # Write-Log "Requesting search query for $Type" "INFO"
     
     # Check for history
-    $history = & "$PSScriptRoot/../../wsl-rmpc-exec.ps1" -Command "test -f $script:YouTubeHistoryFile && cat $script:YouTubeHistoryFile || echo ''"
+    $history = & wsl-rmpc-exec -Command "test -f $script:YouTubeHistoryFile && cat $script:YouTubeHistoryFile || echo ''"
     
     if (-not [string]::IsNullOrEmpty($history))
     {
@@ -906,7 +905,7 @@ systemctl --user restart mpd && echo "MPD restarted successfully" || echo "Faile
 
 function Invoke-RestartFfplay
 {
-    pwsh-msg -Command ". '$(Join-Path $PSScriptRoot 'wffplay-keeper.ps1')'" -Restart -Name "Rmpc Control" -PipeName "PWSH_COMMAND_PIPE"
+    pwsh-msg -Command ". ffplay-keeper" -Restart -Name "Rmpc Control" -PipeName "PWSH_COMMAND_PIPE"
 }
 
 # Main execution
