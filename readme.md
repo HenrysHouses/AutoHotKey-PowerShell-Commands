@@ -78,3 +78,8 @@ These additional scripts and tools build on the pipe daemon:
 - **GlazeWM CLI:** Used by the default alt+tab replacement script.
 - **Zoxide:** Used for resolving unknown paths in directory scripts.
 - **WSL integration:** Includes RMPC setup for dual boot music control.
+
+# AI Disclaimer
+
+This project started as a way to fix windows scripting which i solved by my self. 
+As time passed I got curious about CLI AI tools so some has been used and tested their capabilities after the original version of these scripts to some moderate results. This will likely be one of the only projects ill be publicly using AI for. Although my motivation to make these scripts are strictly for personal use so if they have bugs or security issues im not too concerned if the AI makes any mistakes.
