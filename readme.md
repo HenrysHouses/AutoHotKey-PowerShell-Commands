@@ -55,7 +55,13 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
     ```powershell
     winget install 9PLQFDG8HH9D
     ```
-This is only required to launch the ahk script. If you already have a usable compiled script, then this can be skipped.
+AutoHotKeys is only a requirement to execute uncompiled scripts. 
+
+This dependency only applies to you if:
+- you want to be able to edit and relaunch the `.ahk` script.
+
+otherwise if you already have a usable compiled script, then this can be skipped.
+
 ## Installation & Setup
 
 1. Keep the two scripts in a directory accessible to your tools. I keep mine in ~/bin, or symlinked to that location
