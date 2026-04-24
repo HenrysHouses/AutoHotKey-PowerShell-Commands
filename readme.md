@@ -14,16 +14,19 @@ pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]
 
 **Options:**
 - `-List`: Show all running daemon instances and their status. Automatically cleans up broken instances when detected.
+- `-Log <str>`: Outputs the logs for the matching pipe daemon *not implemented yet*
 - `-Kill <PID>`: Gracefully terminate a daemon instance by its Process ID.
+- `-Help`: Show the built-in help message.
 - `-PipeName <Str>`: Specify a custom pipe name (default: `PWSH_COMMAND_PIPE`).
 - `-Help`: Show the built-in help message.
+
 
 **Features:**
 - **Instance Reuse:** Creates and manages a pool of up to 5 PowerShell instances to minimize overhead.
 - **State Management:** Automatically detects and replaces broken, dirty, or unusable instances.
 - **Singleton Support:** Operates as a singleton based on the pipe name.
 - **Logging:** Tracks instances and states via temporary JSON files for validation.
-    Daemon logs: `$env:LOCALAPPDATA/pwsh-pipe-daemons/[PIPE_NAME]-daemon.log}`
+    Daemon logs: `$env:LOCALAPPDATA/pwsh-pipe-daemons/$pipeName-daemon.log`
     Instance temp tracking: `$env:TEMP/pwsh-daemon-instances`
 - **External Integration:** Can be utilized by anything that can write to a named pipe (AHK, PowerShell, etc.).
 
@@ -38,7 +41,8 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
 **Options:**
 - `-Command <Str>`: The PowerShell command or script block to execute.
     - *Toggle Behavior:* Requesting an identical command while it is already running will automatically cancel it.
-- `-Restart`: Restarts the command if it is already running (cancels and then re-executes).
+- `-Cancel`: Cancels the command if it is running. (will not start any executions)
+- `-Restart`: Restarts the command if it is already running (cancels and then re-executes). *not implemented yet*
 - `-Name <Str>`: Optional identifier to show in the daemon logs (useful for SSH sessions or specific tools).
 - `-PipeName <Str>`: Specify the target pipe (default: `PWSH_COMMAND_PIPE`).
 - `-Help`: Show the built-in help message.
@@ -64,9 +68,6 @@ These additional scripts and tools build on the pipe daemon:
 
 - **fzf:** Required for TUI-based scripts (`winget install fzf`).
 - **wlines:** A portable binary used by many scripts for dmenu / rofi based operations.
-- **GlazeWM CLI:** Used by the default alt+tab replacement scripts.
+- **GlazeWM CLI:** Used by the default alt+tab replacement script.
 - **Zoxide:** Used for resolving unknown paths in directory scripts.
 - **WSL integration:** Includes RMPC setup for dual boot music control.
-
----
-*For more detailed information on specific features, run either script with the `-Help` flag.*
