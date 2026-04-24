@@ -52,15 +52,17 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
 ## Dependencies
 
 - **AutoHotKeys v2.0**
+
+    AutoHotKeys is only a requirement to execute uncompiled scripts. 
+
+    This dependency only applies to you if:
+      - you want to be able to edit and relaunch the `.ahk` script.
+
+    otherwise if you already have a usable compiled script, then this can be skipped.
+
     ```powershell
     winget install 9PLQFDG8HH9D
     ```
-AutoHotKeys is only a requirement to execute uncompiled scripts. 
-
-This dependency only applies to you if:
-- you want to be able to edit and relaunch the `.ahk` script.
-
-otherwise if you already have a usable compiled script, then this can be skipped.
 
 ## Installation & Setup
 
