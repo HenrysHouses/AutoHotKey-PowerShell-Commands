@@ -62,6 +62,11 @@ OnExit(KillConnection)
 	PipeWrite(content, pipeName)
 }
 
+^!n:: {
+	content := "__FROM__:AutoHotKeys`nC:\Users\Henri\remote\quake.ps1 wrmpc -fzf"
+	PipeWrite(content, pipeName)
+}
+
 ; JSON library for v2.0
 class JSON {
 	static Parse(text) {
