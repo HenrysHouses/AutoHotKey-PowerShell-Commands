@@ -53,7 +53,7 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
 
 - **AutoHotKeys v2.0**
 
-    AutoHotKeys is only a requirement to execute uncompiled scripts. 
+    AutoHotKeys is only a requirement to execute uncompiled scripts.   
     **This dependency only applies to you if:**
     
     - you want to be able to edit and relaunch the `.ahk` script.
