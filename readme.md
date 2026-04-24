@@ -1,55 +1,72 @@
-# Features
+# PowerShell Pipe Commands
 
-- pwsh-pipe-daemon.ps1
-    Creates powershell instances to run commands without any additional overhead from windows API.
-    - Allows reuse of powershell instances
-    - Automatically gets rid of broken / dirty / unusuable instances. typically happens when the powershell state cant be cleaned
-    - Singleton and restart support. will attempt to recover from errors.
-    - prints all data stored in temp files
-    - kill helper to forcably kill unresponsive daemons
-    - from applies a name to the logs to signal what requested the invoked message
-    - pipename to start a daemon using a unique pipe name overriding the default
-    
-- pwsh-msg.ps1
-    Allows you to send messages directly to pwsh-pipe-daemon.ps1 from cli with ssh support and logging
+A set of scripts to enable near-instant execution of PowerShell commands from external sources (AHK, CLI, etc.) by using a background daemon that reuses PowerShell instances.
 
+## Core Components
 
-Dependencies:
+### pwsh-pipe-daemon.ps1
+The background service that listens on a named pipe and manages a pool of PowerShell instances.
 
-- AutoHotKeys v 2.0
+**Usage:**
+```powershell
+pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]
+```
 
-    ```pwsh
+**Options:**
+- `-List`: Show all running daemon instances and their status. Automatically cleans up broken instances when detected.
+- `-Kill <PID>`: Gracefully terminate a daemon instance by its Process ID.
+- `-PipeName <Str>`: Specify a custom pipe name (default: `PWSH_COMMAND_PIPE`).
+- `-Help`: Show the built-in help message.
+
+**Features:**
+- **Instance Reuse:** Creates and manages a pool of up to 5 PowerShell instances to minimize overhead.
+- **State Management:** Automatically detects and replaces broken, dirty, or unusable instances.
+- **Singleton Support:** Operates as a singleton based on the pipe name.
+- **Logging:** Tracks instances and states via temporary JSON files for validation.
+    Daemon logs: `$env:LOCALAPPDATA/pwsh-pipe-daemons/[PIPE_NAME]-daemon.log}`
+    Instance temp tracking: `$env:TEMP/pwsh-daemon-instances`
+- **External Integration:** Can be utilized by anything that can write to a named pipe (AHK, PowerShell, etc.).
+
+### pwsh-msg.ps1
+A named pipe wrapper to send commands to a running daemon.
+
+**Usage:**
+```powershell
+pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] [-Help]
+```
+
+**Options:**
+- `-Command <Str>`: The PowerShell command or script block to execute.
+    - *Toggle Behavior:* Requesting an identical command while it is already running will automatically cancel it.
+- `-Restart`: Restarts the command if it is already running (cancels and then re-executes).
+- `-Name <Str>`: Optional identifier to show in the daemon logs (useful for SSH sessions or specific tools).
+- `-PipeName <Str>`: Specify the target pipe (default: `PWSH_COMMAND_PIPE`).
+- `-Help`: Show the built-in help message.
+
+**Note:** For maximum performance from outside a terminal, writing directly to the named pipe is faster than calling this script, as it avoids the overhead of spawning a new PowerShell process just to send a message.
+
+## Dependencies
+
+- **AutoHotKeys v2.0**
+    ```powershell
     winget install 9PLQFDG8HH9D
     ```
-    If you want a portable config then make your AHK scripts and compile them to binaries
+This is only required to launch the ahk script. If you already have a usable compiled script, then this can be skipped.
+## Installation & Setup
 
-(Optional but recommended) 
-- PowerShell 7.x
+1. Keep the two scripts in a directory accessible to your tools. I keep mine in ~/bin, or symlinked to that location
+2. (Optional) Add the script directory to your system's `PATH`.
+3. Start the daemon in the background or a dedicated terminal.
 
-    ```pwsh
-    winget install Microsoft.PowerShell
-    ```
+## Advanced Configuration (My Config)
 
-Once installed, keep the two scripts running and that's it
+These additional scripts and tools build on the pipe daemon:
 
-Optional step: add the pwsh-pipe-daemon script to your shell's path environment variable
+- **fzf:** Required for TUI-based scripts (`winget install fzf`).
+- **wlines:** A portable binary used by many scripts for dmenu / rofi based operations.
+- **GlazeWM CLI:** Used by the default alt+tab replacement scripts.
+- **Zoxide:** Used for resolving unknown paths in directory scripts.
+- **WSL integration:** Includes RMPC setup for dual boot music control.
 
-
-# My config
-
-Dependencies:
-
-- fzf
-
-    ```pwsh 
-    winget install fzf
-    ```
-
-My config scripts rely on the wlines binary. it should be portable so it can work on any machine.
-but the -fzf flag relies on fzf being installed. This is to make the same scripts usable as TUI instead of GUI
-
-As i use glazewm for window management the tab replacement script i use by defult also uses the glazewm cli. so if you dont have that. use the windows-tab script instead
-The open directory / path script also relies on zoxide to resolve unknown paths. so if you want an easier time using that script. get zoxide
-https://github.com/ajeetdsouza/zoxide
-
-On wsl i have connected RMPC up with my linux dual boot drive to give me a cross OS music player.
+---
+*For more detailed information on specific features, run either script with the `-Help` flag.*

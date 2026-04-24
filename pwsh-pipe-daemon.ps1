@@ -1,8 +1,29 @@
-param(
+﻿param(
     [switch]$List,
     [int]$Kill = -1,
-    [string]$PipeName = "PWSH_COMMAND_PIPE"
+    [string]$PipeName = "PWSH_COMMAND_PIPE",
+    [switch]$Help
 )
+
+if ($Help)
+{
+    Write-Host "Usage: pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  -List            Show all running daemon instances and their status. Cleans broken instances when detected."
+    Write-Host "  -Kill <PID>      Gracefully terminate a daemon instance by its Process ID."
+    Write-Host "  -PipeName <Str>  Specify a custom pipe name (default: PWSH_COMMAND_PIPE)."
+    Write-Host "  -Help            Show this help message."
+    Write-Host ""
+    Write-Host "Usage:"
+    Write-Host "  The daemon acts as a singleton based on the pipe name. It writes to temp files to track instances"
+    Write-Host "  and states which are automatically checked for validation."
+    Write-Host "  Running the daemon in the background will allow you to use pwsh-msg.ps1 to send commands through" 
+    Write-Host "  pipes to execute them within the daemon. This can also be utilized by anything which can write"
+    Write-Host "  to the pipe the daemon is listning on such as AHK, powershell or anything else."
+    Write-Host "  This enabled near instant execution of scripts and terminal commands from external sources"
+    exit 0
+}
 
 Import-Module Microsoft.PowerShell.Utility  
 Import-Module Microsoft.PowerShell.Management
@@ -88,8 +109,7 @@ if ($List)
                             {
                                 $Connector =    "├┬─"
                                 $CmdConnector = "│└──"
-                            }
-                            else
+                            } else
                             {
                                 $Connector =    "├──"
                                 $CmdConnector = ""
@@ -100,8 +120,7 @@ if ($List)
                             {
                                 $Connector =    "└┬─"
                                 $CmdConnector = " └──"
-                            }
-                            else
+                            } else
                             {
                                 $Connector =    "└──"
                                 $CmdConnector = ""
@@ -231,8 +250,9 @@ if (Test-Path $daemonTempDir)
     }
 }
 
-$LogDir = Join-Path $env:LOCALAPPDATA 'wlines'
-$LogPath = Join-Path $LogDir 'pwsh-pipe-daemon.log'
+$LogDir = Join-Path $env:LOCALAPPDATA 'pwsh-pipe-daemon'
+$LogName = "$($PipeName)-daemon.log"
+$LogPath = Join-Path $LogDir $LogName
 if (-not (Test-Path $LogDir))
 {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
