@@ -14,7 +14,7 @@ pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]
 
 **Options:**
 - `-List`: Show all running daemon instances and their status. Automatically cleans up broken instances when detected.
-- `-Log <str>`: Outputs the logs for the matching pipe daemon *not implemented yet*
+- `-Log <str>`: Outputs the logs for the matching pipe daemon *(not implemented yet)*
 - `-Kill <PID>`: Gracefully terminate a daemon instance by its Process ID.
 - `-Help`: Show the built-in help message.
 - `-PipeName <Str>`: Specify a custom pipe name (default: `PWSH_COMMAND_PIPE`).
@@ -41,8 +41,8 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
 **Options:**
 - `-Command <Str>`: The PowerShell command or script block to execute.
     - *Toggle Behavior:* Requesting an identical command while it is already running will automatically cancel it.
-- `-Cancel`: Cancels the command if it is running. (will not start any executions)
-- `-Restart`: Restarts the command if it is already running (cancels and then re-executes). *not implemented yet*
+- `-Cancel`: Cancels the command if it is running. (will not start any executions) *(not implemented yet)*
+- `-Restart`: Restarts the command if it is already running (cancels and then re-executes). 
 - `-Name <Str>`: Optional identifier to show in the daemon logs (useful for SSH sessions or specific tools).
 - `-PipeName <Str>`: Specify the target pipe (default: `PWSH_COMMAND_PIPE`).
 - `-Help`: Show the built-in help message.
