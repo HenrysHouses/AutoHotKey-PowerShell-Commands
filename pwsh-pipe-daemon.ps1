@@ -1,19 +1,49 @@
-﻿param(
+﻿[CmdletBinding()]
+param(
     [switch]$List,
-    [int]$Kill = -1,
+    [int]$Log = 0,
     [string]$PipeName = "PWSH_COMMAND_PIPE",
-    [switch]$Help
+    [switch]$Help,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]] $RemainingArgs = @()
 )
+
+$Kill = $null
+
+for ($i = 0; $i -lt $RemainingArgs.Count; $i++)
+{
+    switch ($RemainingArgs[$i])
+    {
+        '-Kill'
+        {
+            if ($i + 1 -lt $RemainingArgs.Count -and $args[$i + 1] -notmatch '^-')
+            {
+                $Kill = [int]$RemainingArgs[++$i]
+            } else
+            {
+                $Kill = -1
+            }
+        }
+
+        default
+        {
+            throw "Unknown argument: $($RemainingArgs[$i])"
+        }
+    }
+}
 
 if ($Help)
 {
     Write-Host "Usage: pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -List            Show all running daemon instances and their status. Cleans broken instances when detected."
-    Write-Host "  -Kill <PID>      Gracefully terminate a daemon instance by its Process ID."
-    Write-Host "  -PipeName <Str>  Specify a custom pipe name (default: PWSH_COMMAND_PIPE)."
-    Write-Host "  -Help            Show this help message."
+    Write-Host "  -List              Show all running daemon instances and their status. Cleans broken instances when detected."
+    Write-Host "  -Log <Str>         Outputs the logs for the matching pipe daemon"
+    Write-Host "  -Kill              Gracefully terminate a daemon through selection via fzf"
+    Write-Host "  -Kill <PID>        Gracefully terminate a daemon instance by its Process ID."
+    Write-Host "  -DisposeShell <ID> Gracefully terminate an instanced shell. (not implemented)"
+    Write-Host "  -PipeName <Str>    Specify a custom pipe name (default: PWSH_COMMAND_PIPE)."
+    Write-Host "  -Help              Show this help message."
     Write-Host ""
     Write-Host "Usage:"
     Write-Host "  The daemon acts as a singleton based on the pipe name. It writes to temp files to track instances"
@@ -31,6 +61,197 @@ Import-Module Microsoft.PowerShell.Management
 $pipeName = $PipeName
 $powerShellInstances = @{}
 $activeCommands = @{}
+
+function Get-DaemonPID
+{
+    $daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
+    
+    if (-not (Test-Path $daemonTempDir))
+    {
+        Write-Host "[INFO] No pwsh-daemon instances found"
+        exit 0
+    }
+    
+    $daemonFiles = Get-ChildItem -Path $daemonTempDir -Filter "daemon_*.json" -ErrorAction SilentlyContinue
+    
+    if (-not $daemonFiles)
+    {
+        Write-Host "[INFO] No pwsh-daemon instances found"
+        exit 0
+    }
+    
+    $instances = @()
+    foreach ($file in $daemonFiles)
+    {
+        try
+        {
+            $content = Get-Content -Path $file.FullName | ConvertFrom-Json
+            $proc = Get-Process -Id $content.PID -ErrorAction SilentlyContinue
+            
+            if ($proc)
+            {
+                return $content.PID
+                
+            } else
+            {
+                return "DEAD"
+            }
+        } catch
+        {
+            Write-Host "[WARNING] Failed to parse: $($file.Name)" -ForegroundColor Yellow
+            return "NONE"
+        }
+        return "NONE"
+    }
+    return "NONE"
+}
+
+function Write-DaemonInfo
+{
+    $bannerWidth = 55
+    $col1Width = 19
+    $col2Width = 35
+
+    $header = "PowerShell Pipe Daemon"
+    $hPad = [math]::Floor(($bannerWidth - $header.Length) / 2)
+    $hLeft = " " * $hPad
+    $hRight = " " * ($bannerWidth - $header.Length - $hPad)
+
+    $pipeLabel = " Listening On Pipe"
+    $pVal = " $pipeName"
+    $pRight = " " * [math]::Max(0, ($col2Width - $pVal.Length))
+
+    $pidLabel = " Daemon PID"
+
+    if ($Log -gt 0)
+    {
+        $DaemonPID = Get-DaemonPID
+        $pidVal = " $DaemonPID"
+    } else
+    {
+        $pidVal = " $PID"
+    }
+
+    $pidRight = " " * [math]::Max(0, ($col2Width - $pidVal.Length))
+
+    Write-Host "╔$((New-Object String '═', $bannerWidth))╗"
+    Write-Host "║$hLeft$header$hRight║"
+    Write-Host "╟$((New-Object String '─', $col1Width))┬$((New-Object String '─', $col2Width))╢"
+    Write-Host "║$($pipeLabel.PadRight($col1Width))│$pVal$pRight║"
+    Write-Host "╟$((New-Object String '─', $col1Width))┼$((New-Object String '─', $col2Width))╢"
+    Write-Host "║$($pidLabel.PadRight($col1Width))│$pidVal$pidRight║"
+    Write-Host "╚$((New-Object String '═', $col1Width))╧$((New-Object String '═', $col2Width))╝ `n"
+    # Write-Host ""
+
+    Write-Host "[Time Stamp] - [Event Log]"
+    Write-Host "─────────────────────────────────────────────────────────"
+}
+
+function Write-DaemonFile
+{
+    param(
+        [string]$TempFile
+    )
+
+    $instances = @()
+
+    try
+    {
+        $content = Get-Content -Path $TempFile | ConvertFrom-Json
+        $proc = Get-Process -Id $content.PID -ErrorAction SilentlyContinue
+            
+        if ($proc)
+        {
+            # Process is still running
+            $instances += $content
+
+            if ($content.PoolSize -lt 1)
+            {
+                $Connector = "└──"
+            } else
+            {
+                $Connector = "└┬─"
+            }
+
+            Write-Host "DEMON: $($content.WindowTitle) | Created: $($content.CreatedAt)" -ForegroundColor Cyan
+            Write-Host "$Connector $($content.PoolSize)/5 instances | Commands: $($content.RunningCommands.Count)" -ForegroundColor Gray
+                
+            # Show all instances in the pool
+            if ($content.Instances -and $content.Instances.Count -gt 0)
+            {
+                # foreach ($inst in $content.Instances)
+                for ($index = 0; $index -lt $content.Instances.Count; $index++)
+                {
+                    $inst = $content.instances[$index]
+                    $status = "IDLE"
+                    if ($inst.IsActive)
+                    { $status = "ACTIVE" 
+                    } elseif ($inst.IsBusy)
+                    { $status = "BUSY" 
+                    } elseif ($inst.IsDirty)
+                    { $status = "DIRTY" 
+                    }
+                        
+                    $color = if ($inst.IsActive)
+                    { "Green" 
+                    } elseif ($inst.IsBusy)
+                    { "Yellow" 
+                    } elseif ($inst.IsDirty)
+                    { "Red" 
+                    } else
+                    { "Gray" 
+                    }
+
+                    if ($index -lt $content.instances.Count-1)
+                    {
+                        if ($content.instances[$index].Command)
+                        {
+                            $Connector =    "├┬─"
+                            $CmdConnector = "│└──"
+                        } else
+                        {
+                            $Connector =    "├──"
+                            $CmdConnector = ""
+                        }
+                    } else
+                    {
+                        if ($content.instances[$index].Command)
+                        {
+                            $Connector =    "└┬─"
+                            $CmdConnector = " └──"
+                        } else
+                        {
+                            $Connector =    "└──"
+                            $CmdConnector = ""
+                        }
+                    }
+
+                    $displayCommand = if ($inst.Command)
+                    { " `n $CmdConnector Cmd: $($inst.Command)" 
+                    } else
+                    { " " 
+                    }
+                    Write-Host " $Connector[$status] $($inst.Id)$displayCommand" -ForegroundColor $color
+                }
+            }
+        } else
+        {
+            # Process is dead - get its state and clean up
+            Write-Host "PID: $($content.PID) | $($content.WindowTitle) | State: DEAD | Created: $($content.CreatedAt)" -ForegroundColor Red
+            if ($content.Instances -and $content.Instances.Count -gt 0)
+            {
+                Write-Host "  Orphaned instances: $($content.Instances.Count)" -ForegroundColor Yellow
+            }
+            Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+        }
+    } catch
+    {
+        Write-Host "[WARNING] Failed to parse: $($file.Name)" -ForegroundColor Yellow
+        return 0
+    }
+
+    return 1
+}
 
 # Handle -List parameter to show running instances
 if ($List)
@@ -53,102 +274,10 @@ if ($List)
     
     Write-Host "[Daemon Instances]`n"
     
-    $instances = @()
+    $instances = 0
     foreach ($file in $daemonFiles)
     {
-        try
-        {
-            $content = Get-Content -Path $file.FullName | ConvertFrom-Json
-            $proc = Get-Process -Id $content.PID -ErrorAction SilentlyContinue
-            
-            if ($proc)
-            {
-                # Process is still running
-                $instances += $content
-
-                if ($content.PoolSize -lt 1)
-                {
-                    $Connector = "└──"
-                } else
-                {
-                    $Connector = "└┬─"
-                }
-
-                Write-Host "DEMON: $($content.WindowTitle) | Created: $($content.CreatedAt)" -ForegroundColor Cyan
-                Write-Host "$Connector $($content.PoolSize)/5 instances | Commands: $($content.RunningCommands.Count)" -ForegroundColor Gray
-                
-                # Show all instances in the pool
-                if ($content.Instances -and $content.Instances.Count -gt 0)
-                {
-                    # foreach ($inst in $content.Instances)
-                    for ($index = 0; $index -lt $content.Instances.Count; $index++)
-                    {
-                        $inst = $content.instances[$index]
-                        $status = "IDLE"
-                        if ($inst.IsActive)
-                        { $status = "ACTIVE" 
-                        } elseif ($inst.IsBusy)
-                        { $status = "BUSY" 
-                        } elseif ($inst.IsDirty)
-                        { $status = "DIRTY" 
-                        }
-                        
-                        $color = if ($inst.IsActive)
-                        { "Green" 
-                        } elseif ($inst.IsBusy)
-                        { "Yellow" 
-                        } elseif ($inst.IsDirty)
-                        { "Red" 
-                        } else
-                        { "Gray" 
-                        }
-
-                        if ($index -lt $content.instances.Count-1)
-                        {
-                            if ($content.instances[$index].Command)
-                            {
-                                $Connector =    "├┬─"
-                                $CmdConnector = "│└──"
-                            } else
-                            {
-                                $Connector =    "├──"
-                                $CmdConnector = ""
-                            }
-                        } else
-                        {
-                            if ($content.instances[$index].Command)
-                            {
-                                $Connector =    "└┬─"
-                                $CmdConnector = " └──"
-                            } else
-                            {
-                                $Connector =    "└──"
-                                $CmdConnector = ""
-                            }
-                        }
-
-                        $displayCommand = if ($inst.Command)
-                        { " `n $CmdConnector Cmd: $($inst.Command)" 
-                        } else
-                        { " " 
-                        }
-                        Write-Host " $Connector[$status] $($inst.Id)$displayCommand" -ForegroundColor $color
-                    }
-                }
-            } else
-            {
-                # Process is dead - get its state and clean up
-                Write-Host "PID: $($content.PID) | $($content.WindowTitle) | State: DEAD | Created: $($content.CreatedAt)" -ForegroundColor Red
-                if ($content.Instances -and $content.Instances.Count -gt 0)
-                {
-                    Write-Host "  Orphaned instances: $($content.Instances.Count)" -ForegroundColor Yellow
-                }
-                Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
-            }
-        } catch
-        {
-            Write-Host "[WARNING] Failed to parse: $($file.Name)" -ForegroundColor Yellow
-        }
+        $instances += Write-DaemonFile -TempFile $file
     }
     
     if ($instances.Count -eq 0)
@@ -161,51 +290,195 @@ if ($List)
     exit 0
 }
 
-# Handle -Kill parameter to gracefully terminate a daemon instance
-if ($Kill -ge 0)
+if ($Log)
 {
-    $daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
+    Write-DaemonInfo
+    $foundError = $false
+    $LoggedEvents = Get-Content $env:LOCALAPPDATA\pwsh-pipe-daemon\$($PipeName)-daemon.log -Tail $Log
+    $LoggedEvents | ForEach-Object { 
+        if (Write-Output $_ | rg ".*\[INFO\] Completed Invocation.*")
+        {
+            $foundError = $false 
+            Write-Host $_ -ForegroundColor Green
+        } elseif (Write-Output $_ | rg ".*\[INFO\] Recreating pipe.*")
+        {
+            $foundError = $false 
+            Write-Host $_ -ForegroundColor Yellow
+        } elseif (Write-Output $_ | rg ".*\[INFO\] Connection closed.*")
+        {
+            $foundError = $false 
+            Write-Host $_ -ForegroundColor Gray
+        } elseif (Write-Output $_ | rg ".*\[ACTION\] Invoke requested by \[.*ssh:.*]\.*")
+        {
+            $foundError = $false 
+            Write-Host $_ -ForegroundColor Cyan
+        } elseif (Write-Output $_ | rg ".*\[ACTION\] Invoke requested by.*")
+        {
+            $foundError = $false 
+            Write-Host $_ -ForegroundColor DarkCyan
+        } elseif (Write-Output $_ | rg ".*\[ACTION\] Invoking command.*")
+        {
+            $foundError = $false 
+            Write-Host $_ -ForegroundColor Blue
+        } elseif (Write-Output $_ | rg ".*\[ACTION\] Cancelled Invocation.*")
+        {
+            $foundError = $false 
+            Write-Host $_ -ForegroundColor DarkYellow
+        } elseif (Write-Output $_ | rg ".*\[ERROR\].*")
+        {
+            $foundError = $true 
+            Write-Host $_ -ForegroundColor Red
+        } elseif (Write-Output $_ | rg "^(?!..:..:..\.... - \[[^\]]*\]).*$" --pcre2)
+        {
+            if ($foundError -eq $true)
+            {
+                Write-Host $_ -ForegroundColor Red
+            } else 
+            {
+                $foundError = $false 
+                Write-Host $_
+            }
+        } else
+        {
+            $foundError = $false
+            Write-Host $_
+        }
+    }
+
+    exit 0
+}
+$daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
+
+function Stop-Daemon 
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$DaemonTempFile,
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$DaemonPid
+    )
+
+    $proc = Get-Process -Id $DaemonPID -ErrorAction SilentlyContinue
+    if ($proc)
+    {
+        Write-Host "[INFO] Killing pwsh-daemon instance PID: $DaemonPID" -ForegroundColor Yellow
+            
+        # Kill all spawned instances first
+        if ($daemonData.SpawnedInstances -and $daemonData.SpawnedInstances.Count -gt 0)
+        {
+            Write-Host "[INFO] Killing $($daemonData.SpawnedInstances.Count) spawned PowerShell instance(s)..." -ForegroundColor Yellow
+            foreach ($instanceId in $daemonData.SpawnedInstances)
+            {
+                Write-Host "  --> Terminating runspace: $instanceId" -ForegroundColor Gray
+            }
+        }
+            
+        $proc | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+            
+        # Clean up temp file
+        Remove-Item -Path $DaemonTempFile -Force -ErrorAction SilentlyContinue
+            
+        # Verify it was killed
+        if (-not (Get-Process -Id $DaemonPID -ErrorAction SilentlyContinue))
+        {
+            Write-Host "[INFO] pwsh-daemon instance $DaemonPID successfully terminated" -ForegroundColor Green
+        } else
+        {
+            Write-Host "[ERROR] Failed to terminate pwsh-daemon instance $DaemonPID" -ForegroundColor Red
+            exit 1
+        }
+    } else
+    {
+        Write-Host "[INFO] Process $DaemonPID not running, cleaning up stale temp file" -ForegroundColor Yellow
+        Remove-Item -Path $DaemonTempFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+if ($Kill -eq -1)
+{
+    $daemonFiles = Join-Path $env:TEMP 'pwsh-daemon-instances' | Get-ChildItem -File -Name
+
+    if ($daemonFiles.Count -eq 0)
+    {
+        Write-Host "[INFO] There are no known daemon instances running. If any daemons are still running specify its PID in the command"
+        exit 0
+    }
+
+    if ($null -eq (Get-Command fzf))
+    {
+        Write-Host "[WARNING] Fzf is not installed. Interactive kill prompt can not be used. Install it with 'winget install fzf' or kill with specified PID '-Kill <int>'" -ForegroundColor Yellow
+        exit 0
+    }
+
+    $pipeNames = @()
+    $pipeDictionary = @{}
+    $daemonFiles | ForEach-Object {
+        $jsonPath = Join-Path $env:TEMP 'pwsh-daemon-instances' $_
+        $name = (Get-Content $jsonPath | ConvertFrom-Json).PipeName
+        $pipePID = (Get-Content $jsonPath | ConvertFrom-Json).PID
+        $displayName = "$name - PID: $pipePID|$jsonPath"
+
+        $pipeNames += $displayName
+        $pipeDictionary[$displayName] = @{
+            target = $pipePID
+            json = $jsonPath
+        }
+        Write-Host $name
+    }
+
+    # Write-Host $daemonFileScriptBlock
+    $daemonFileScriptBlock = (Get-Command Write-DaemonFile).ScriptBlock.ToString()
+    # $daemonFileScriptBlock = $daemonFileScriptBlock -replace '`', '``' -replace '"', '`"' -replace '\$', '`$'
+
+    $readCommand = @"
+if (`$null -eq (Get-Command bat))
+{
+    `$fileContent = { Get-Content `"$jsonPath`" }
+} else
+{
+    `$fileContent = { bat --color=always `"$jsonPath`" }
+}
+
+$daemonFileScriptBlock -TempFile `"$jsonPath`"
+`$fileContent
+"@
+    pwsh -NoProfile -Command $readCommand -- $jsonPath
+
+#     $readCommand = @"
+# if (`$null -eq (Get-Command bat))
+# {
+#     `$fileContent = { Get-Content {2} }
+# } else
+# {
+#     `$fileContent = { bat --color=always {2} }
+# }
+#
+# $daemonFileScriptBlock -TempFile {2}
+# `$fileContent
+# "@
+    # $bytes = [System.Text.Encoding]::Unicode.GetBytes($readCommand)
+    # $encodedPreviewCommand = [Convert]::ToBase64String($Bytes)
+
+    $previewCommand = "pwsh -NoProfile -EncodedCommand $encodedPreviewCommand"
+    $previewCommand = "pwsh -NoProfile -Command $readCommand {2}"
+    # $selectedDaemon = $pipeNames | fzf --prompt "Kill: " --preview "$previewCommand" --delimiter='|' --with-nth='{1}' --preview-label 'Temp File' --footer 'Kill Pwsh Pipe Daemon' --footer-label-pos 'center'
+
+    if ($null -ne $selectedDaemon)
+    {
+        Stop-Daemon -DaemonPID $pipeDictionary[$selectedDaemon].target -DaemonTempFile "$pipeDictionary[$selectedDaemon].json"
+    }
+
+    exit 0
+} elseif ($Kill -ge 0)
+{ 
     $daemonTempFile = Join-Path $daemonTempDir "daemon_$Kill.json"
-    
-    # Verify the temp file exists and the process is running
     if (Test-Path $daemonTempFile)
     {
         $daemonData = Get-Content -Path $daemonTempFile | ConvertFrom-Json
         $proc = Get-Process -Id $Kill -ErrorAction SilentlyContinue
-        if ($proc)
-        {
-            Write-Host "[INFO] Killing pwsh-daemon instance PID: $Kill" -ForegroundColor Yellow
-            
-            # Kill all spawned instances first
-            if ($daemonData.SpawnedInstances -and $daemonData.SpawnedInstances.Count -gt 0)
-            {
-                Write-Host "[INFO] Killing $($daemonData.SpawnedInstances.Count) spawned PowerShell instance(s)..." -ForegroundColor Yellow
-                foreach ($instanceId in $daemonData.SpawnedInstances)
-                {
-                    Write-Host "  --> Terminating runspace: $instanceId" -ForegroundColor Gray
-                }
-            }
-            
-            $proc | Stop-Process -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 500
-            
-            # Clean up temp file
-            Remove-Item -Path $daemonTempFile -Force -ErrorAction SilentlyContinue
-            
-            # Verify it was killed
-            if (-not (Get-Process -Id $Kill -ErrorAction SilentlyContinue))
-            {
-                Write-Host "[OK] pwsh-daemon instance $Kill successfully terminated" -ForegroundColor Green
-            } else
-            {
-                Write-Host "[ERROR] Failed to terminate pwsh-daemon instance $Kill" -ForegroundColor Red
-                exit 1
-            }
-        } else
-        {
-            Write-Host "[INFO] Process $Kill not running, cleaning up stale temp file" -ForegroundColor Yellow
-            Remove-Item -Path $daemonTempFile -Force -ErrorAction SilentlyContinue
-        }
+        Stop-Daemon $daemonTempFile $Kill
     } else
     {
         Write-Host "[ERROR] No daemon instance found with PID: $Kill" -ForegroundColor Red
@@ -318,6 +591,8 @@ $previousTime = ""
 $pipe = $null
 $closed = $false
 
+Write-DaemonInfo
+
 # Update window title with pipe name and status
 [Console]::Title = "pwsh-pipe-daemon [$pipeName] - PID: $PID"
 $Host.UI.RawUI.WindowTitle = "pwsh-pipe-daemon [$pipeName] - PID: $PID"
@@ -332,34 +607,6 @@ UpdateDaemonTempFile
 $cancellationTokenSource = [System.Threading.CancellationTokenSource]::new()
 $token = $cancellationTokenSource.Token
 
-$bannerWidth = 55
-$col1Width = 19
-$col2Width = 35
-
-$header = "PowerShell Pipe Daemon"
-$hPad = [math]::Floor(($bannerWidth - $header.Length) / 2)
-$hLeft = " " * $hPad
-$hRight = " " * ($bannerWidth - $header.Length - $hPad)
-
-$pipeLabel = " Listening On Pipe"
-$pVal = " $pipeName"
-$pRight = " " * [math]::Max(0, ($col2Width - $pVal.Length))
-
-$pidLabel = " Daemon PID"
-$pidVal = " $PID"
-$pidRight = " " * [math]::Max(0, ($col2Width - $pidVal.Length))
-
-Write-Host "╔$((New-Object String '═', $bannerWidth))╗"
-Write-Host "║$hLeft$header$hRight║"
-Write-Host "╟$((New-Object String '─', $col1Width))┬$((New-Object String '─', $col2Width))╢"
-Write-Host "║$($pipeLabel.PadRight($col1Width))│$pVal$pRight║"
-Write-Host "╟$((New-Object String '─', $col1Width))┼$((New-Object String '─', $col2Width))╢"
-Write-Host "║$($pidLabel.PadRight($col1Width))│$pidVal$pidRight║"
-Write-Host "╚$((New-Object String '═', $col1Width))╧$((New-Object String '═', $col2Width))╝ `n"
-# Write-Host ""
-
-Write-Host "[Time Stamp] - [Event Log]"
-Write-Host "─────────────────────────────────────────────────────────"
 
 function IdleUpdate
 {

@@ -26,7 +26,7 @@ pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]
 - **State Management:** Automatically detects and replaces broken, dirty, or unusable instances.
 - **Singleton Support:** Operates as a singleton based on the pipe name.
 - **Logging:** Tracks instances and states via temporary JSON files for validation.
-    Daemon logs: `$env:LOCALAPPDATA/pwsh-pipe-daemons/$pipeName-daemon.log`
+    Daemon logs: `$env:LOCALAPPDATA/pwsh-pipe-daemon/$pipeName-daemon.log`
     Instance temp tracking: `$env:TEMP/pwsh-daemon-instances`
 - **External Integration:** Can be utilized by anything that can write to a named pipe (AHK, PowerShell, etc.).
 

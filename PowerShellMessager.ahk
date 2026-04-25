@@ -63,7 +63,7 @@ OnExit(KillConnection)
 }
 
 ^!n:: {
-	content := "__FROM__:AutoHotKeys`nC:\Users\Henri\remote\quake.ps1 wrmpc -fzf"
+	content := "__FROM__:AutoHotKeys`nC:\Users\Henri\remote\quake.ps1 C:\Users\Henri\bin\wrmpc.ps1 -fzf"
 	PipeWrite(content, pipeName)
 }
 
