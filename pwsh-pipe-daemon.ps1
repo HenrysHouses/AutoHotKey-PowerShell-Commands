@@ -32,6 +32,45 @@ for ($i = 0; $i -lt $RemainingArgs.Count; $i++)
     }
 }
 
+# Force UTF-8 for box characters and handle ANSI colors
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+if ($PSStyle)
+{ $PSStyle.OutputRendering = 'Ansi' 
+}
+
+# Define color codes for ANSI-aware output
+$esc = [char]27
+$C_Reset   = if ($PSStyle) { $PSStyle.Reset }              else { "$esc[0m" }
+
+$C_Black   = if ($PSStyle) { $PSStyle.Foreground.Black }   else { "$esc[30m" }
+$C_Red     = if ($PSStyle) { $PSStyle.Foreground.Red }     else { "$esc[31m" }
+$C_Green   = if ($PSStyle) { $PSStyle.Foreground.Green }   else { "$esc[32m" }
+$C_Yellow  = if ($PSStyle) { $PSStyle.Foreground.Yellow }  else { "$esc[33m" }
+$C_Blue    = if ($PSStyle) { $PSStyle.Foreground.Blue }    else { "$esc[34m" }
+$C_Magenta = if ($PSStyle) { $PSStyle.Foreground.Magenta } else { "$esc[35m" }
+$C_Cyan    = if ($PSStyle) { $PSStyle.Foreground.Cyan }    else { "$esc[36m" }
+$C_White   = if ($PSStyle) { $PSStyle.Foreground.White }   else { "$esc[37m" }
+
+$C_Gray          = if ($PSStyle) { $PSStyle.Foreground.BrightBlack }   else { "$esc[90m" }
+$C_BrightRed     = if ($PSStyle) { $PSStyle.Foreground.BrightRed }     else { "$esc[91m" }
+$C_BrightGreen   = if ($PSStyle) { $PSStyle.Foreground.BrightGreen }   else { "$esc[92m" }
+$C_BrightYellow  = if ($PSStyle) { $PSStyle.Foreground.BrightYellow }  else { "$esc[93m" }
+$C_BrightBlue    = if ($PSStyle) { $PSStyle.Foreground.BrightBlue }    else { "$esc[94m" }
+$C_BrightMagenta = if ($PSStyle) { $PSStyle.Foreground.BrightMagenta } else { "$esc[95m" }
+$C_BrightCyan    = if ($PSStyle) { $PSStyle.Foreground.BrightCyan }    else { "$esc[96m" }
+$C_BrightWhite   = if ($PSStyle) { $PSStyle.Foreground.BrightWhite }   else { "$esc[97m" }
+
+function Write-Output-Color
+{
+    param([string]$Message)
+    if ($Preview -or $List)
+    { Write-Output $Message 
+    } else
+    { Write-Host $Message 
+    }
+}
+
+
 if ($Help)
 {
     Write-Host "Usage: pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]" -ForegroundColor Cyan
@@ -61,15 +100,16 @@ Import-Module Microsoft.PowerShell.Management
 $pipeName = $PipeName
 $powerShellInstances = @{}
 $activeCommands = @{}
+$daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
+
+# --- Functions ---
 
 function Get-DaemonPID
 {
-    $daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
-    
     if (-not (Test-Path $daemonTempDir))
     {
         Write-Host "[INFO] No pwsh-daemon instances found"
-        exit 0
+        exit "NONE"
     }
     
     $daemonFiles = Get-ChildItem -Path $daemonTempDir -Filter "daemon_*.json" -ErrorAction SilentlyContinue
@@ -77,10 +117,9 @@ function Get-DaemonPID
     if (-not $daemonFiles)
     {
         Write-Host "[INFO] No pwsh-daemon instances found"
-        exit 0
+        exit "NONE"
     }
     
-    $instances = @()
     foreach ($file in $daemonFiles)
     {
         try
@@ -98,10 +137,7 @@ function Get-DaemonPID
             }
         } catch
         {
-            Write-Host "[WARNING] Failed to parse: $($file.Name)" -ForegroundColor Yellow
-            return "NONE"
         }
-        return "NONE"
     }
     return "NONE"
 }
@@ -150,19 +186,23 @@ function Write-DaemonInfo
 function Write-DaemonFile
 {
     param(
-        [string]$TempFile
+        [string]$TempFile,
+        [switch]$NoClean
     )
 
     $instances = @()
 
     try
     {
+        if (-not (Test-Path $TempFile))
+        { 
+            Write-Output-Color "${C_Red}[ERROR] File not found: $TempFile${C_Reset}"; return 0 
+        }
+
         $content = Get-Content -Path $TempFile | ConvertFrom-Json
-        $proc = Get-Process -Id $content.PID -ErrorAction SilentlyContinue
             
-        if ($proc)
+        if (Get-Process -Id $content.PID -ErrorAction SilentlyContinue)
         {
-            # Process is still running
             $instances += $content
 
             if ($content.PoolSize -lt 1)
@@ -173,8 +213,8 @@ function Write-DaemonFile
                 $Connector = "└┬─"
             }
 
-            Write-Host "DEMON: $($content.WindowTitle) | Created: $($content.CreatedAt)" -ForegroundColor Cyan
-            Write-Host "$Connector $($content.PoolSize)/5 instances | Commands: $($content.RunningCommands.Count)" -ForegroundColor Gray
+            Write-Output-Color "${C_Cyan}DEMON: $($content.WindowTitle) | Created: $($content.CreatedAt)${C_Reset}"
+            Write-Output-Color "${C_Reset}$Connector $($content.PoolSize)/5 instances | Commands: $($content.RunningCommands.Count)${C_Reset}"
                 
             # Show all instances in the pool
             if ($content.Instances -and $content.Instances.Count -gt 0)
@@ -184,22 +224,19 @@ function Write-DaemonFile
                 {
                     $inst = $content.instances[$index]
                     $status = "IDLE"
+                    $color = $C_Gray
                     if ($inst.IsActive)
-                    { $status = "ACTIVE" 
+                    { 
+                        $status = "ACTIVE" 
+                        $color = $C_Green
                     } elseif ($inst.IsBusy)
-                    { $status = "BUSY" 
+                    { 
+                        $status = "BUSY" 
+                        $color = $C_Yellow
                     } elseif ($inst.IsDirty)
-                    { $status = "DIRTY" 
-                    }
-                        
-                    $color = if ($inst.IsActive)
-                    { "Green" 
-                    } elseif ($inst.IsBusy)
-                    { "Yellow" 
-                    } elseif ($inst.IsDirty)
-                    { "Red" 
-                    } else
-                    { "Gray" 
+                    { 
+                        $status = "DIRTY" 
+                        $color = $C_Red
                     }
 
                     if ($index -lt $content.instances.Count-1)
@@ -227,26 +264,29 @@ function Write-DaemonFile
                     }
 
                     $displayCommand = if ($inst.Command)
-                    { " `n $CmdConnector Cmd: $($inst.Command)" 
+                    { " `n $C_Reset$CmdConnector$color Cmd: $($inst.Command)${C_Reset}" 
                     } else
                     { " " 
                     }
-                    Write-Host " $Connector[$status] $($inst.Id)$displayCommand" -ForegroundColor $color
+                    Write-Output-Color " $Connector$color[$status] $($inst.Id)$displayCommand${C_Reset}"
                 }
             }
         } else
         {
             # Process is dead - get its state and clean up
-            Write-Host "PID: $($content.PID) | $($content.WindowTitle) | State: DEAD | Created: $($content.CreatedAt)" -ForegroundColor Red
+            Write-Output-Color "${C_Red}PID: $($content.PID) | $($content.WindowTitle) | State: DEAD${C_Reset}"
             if ($content.Instances -and $content.Instances.Count -gt 0)
             {
-                Write-Host "  Orphaned instances: $($content.Instances.Count)" -ForegroundColor Yellow
+                Write-Output-Color "${C_Yellow}Orphaned instances: $($content.Instances.Count)${C_Reset}"
             }
-            Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+            if (-not $NoClean)
+            {
+                Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+            }
         }
     } catch
     {
-        Write-Host "[WARNING] Failed to parse: $($file.Name)" -ForegroundColor Yellow
+        Write-Output-Color "${C_Yellow}[WARNING] Failed to parse: $(Split-Path $TempFile -Leaf)${C_Reset}" 
         return 0
     }
 
@@ -256,11 +296,9 @@ function Write-DaemonFile
 # Handle -List parameter to show running instances
 if ($List)
 {
-    $daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
-    
     if (-not (Test-Path $daemonTempDir))
     {
-        Write-Host "[INFO] No pwsh-daemon instances found"
+        Write-Output-Color "${C_Yellow}[INFO] No pwsh-daemon instances found${C_Reset}"
         exit 0
     }
     
@@ -268,29 +306,30 @@ if ($List)
     
     if (-not $daemonFiles)
     {
-        Write-Host "[INFO] No pwsh-daemon instances found"
+        Write-Output-Color "${C_Yellow}[INFO] No pwsh-daemon instances found${C_Reset}"
         exit 0
     }
     
-    Write-Host "[Daemon Instances]`n"
+    Write-Output-Color "${C_Reset}[Daemon Instances]`n${C_Reset}"
     
     $instances = 0
     foreach ($file in $daemonFiles)
     {
-        $instances += Write-DaemonFile -TempFile $file
+        $instances += 1
+        Write-DaemonFile -TempFile $file
     }
     
     if ($instances.Count -eq 0)
     {
-        Write-Host "[INFO] No running pwsh-daemon instances found`n"
+        Write-Output-Color "${C_Reset}[INFO] No running pwsh-daemon instances found`n${C_Reset}"
         exit 0
     }
     
-    Write-Host "`nTotal: $($instances.Count) running instance(s)`n"
+    Write-Output-Color "${C_Reset}`nTotal: $($instances.Count) running instance(s)`n${C_Reset}"
     exit 0
 }
 
-if ($Log)
+if ($Log -gt 0)
 {
     Write-DaemonInfo
     $foundError = $false
@@ -299,68 +338,95 @@ if ($Log)
         if (Write-Output $_ | rg ".*\[INFO\] Completed Invocation.*")
         {
             $foundError = $false 
-            Write-Host $_ -ForegroundColor Green
+            Write-Output-Color "${C_BrightGreen}$_${C_Reset}"
         } elseif (Write-Output $_ | rg ".*\[INFO\] Recreating pipe.*")
         {
             $foundError = $false 
-            Write-Host $_ -ForegroundColor Yellow
+            Write-Output-Color "${C_BrightYellow}$_${C_Reset}"
         } elseif (Write-Output $_ | rg ".*\[INFO\] Connection closed.*")
         {
             $foundError = $false 
-            Write-Host $_ -ForegroundColor Gray
+            Write-Output-Color "${C_Gray}$_${C_Reset}"
         } elseif (Write-Output $_ | rg ".*\[ACTION\] Invoke requested by \[.*ssh:.*]\.*")
         {
             $foundError = $false 
-            Write-Host $_ -ForegroundColor Cyan
+            Write-Output-Color "${C_BrightCyan}$_${C_Reset}"
         } elseif (Write-Output $_ | rg ".*\[ACTION\] Invoke requested by.*")
         {
             $foundError = $false 
-            Write-Host $_ -ForegroundColor DarkCyan
+            Write-Output-Color "${C_Cyan}$_${C_Reset}"
         } elseif (Write-Output $_ | rg ".*\[ACTION\] Invoking command.*")
         {
             $foundError = $false 
-            Write-Host $_ -ForegroundColor Blue
+            Write-Output-Color "${C_BrightBlue}$_${C_Reset}"
         } elseif (Write-Output $_ | rg ".*\[ACTION\] Cancelled Invocation.*")
         {
             $foundError = $false 
-            Write-Host $_ -ForegroundColor DarkYellow
+            Write-Output-Color "${C_Yellow}$_${C_Reset}"
         } elseif (Write-Output $_ | rg ".*\[ERROR\].*")
         {
             $foundError = $true 
-            Write-Host $_ -ForegroundColor Red
+            Write-Output-Color "${C_BrightRed}$_${C_Reset}"
         } elseif (Write-Output $_ | rg "^(?!..:..:..\.... - \[[^\]]*\]).*$" --pcre2)
         {
             if ($foundError -eq $true)
             {
-                Write-Host $_ -ForegroundColor Red
+                Write-Output-Color "${C_BrightRed}$_${C_Reset}"
             } else 
             {
                 $foundError = $false 
-                Write-Host $_
+                Write-Output-Color "${C_Reset}$_${C_Reset}"
             }
         } else
         {
             $foundError = $false
-            Write-Host $_
+            Write-Output-Color "${C_Reset}$_${C_Reset}"
         }
     }
 
     exit 0
 }
-$daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
+
+if ($Preview)
+{
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    if ($PSStyle)
+    { $PSStyle.OutputRendering = 'Ansi' 
+    }
+    if ($Preview -match '\|([^\|]+)$')
+    { $Preview = $matches[1] 
+    }
+    if (Test-Path $Preview)
+    {
+        Write-DaemonFile -TempFile $Preview -NoClean
+        Write-Output-Color "`n--- JSON Content ---"
+        if (Get-Command bat -ErrorAction SilentlyContinue)
+        { bat --color=always $Preview 
+        } else
+        { Get-Content $Preview 
+        }
+    } else
+    { Write-Output-Color "${C_Red}Preview file not found: $Preview${C_Reset}" 
+    }
+    exit 0
+}
 
 function Stop-Daemon 
 {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true, Position = 0)]
+        [Parameter(Mandatory = $true)]
         [string]$DaemonTempFile,
-        [Parameter(Mandatory = $true, Position = 1)]
+        [Parameter(Mandatory = $true)]
         [int]$DaemonPid
     )
+    
+    $daemonData = if (Test-Path $DaemonTempFile)
+    { 
+        Get-Content $DaemonTempFile | ConvertFrom-Json 
+    }
 
-    $proc = Get-Process -Id $DaemonPID -ErrorAction SilentlyContinue
-    if ($proc)
+    if (Get-Process -Id $DaemonPID -ErrorAction SilentlyContinue)
     {
         Write-Host "[INFO] Killing pwsh-daemon instance PID: $DaemonPID" -ForegroundColor Yellow
             
@@ -374,7 +440,7 @@ function Stop-Daemon
             }
         }
             
-        $proc | Stop-Process -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id $DaemonPid -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 500
             
         # Clean up temp file
@@ -398,7 +464,7 @@ function Stop-Daemon
 
 if ($Kill -eq -1)
 {
-    $daemonFiles = Join-Path $env:TEMP 'pwsh-daemon-instances' | Get-ChildItem -File -Name
+    $daemonFiles = $daemonTempDir | Get-ChildItem -File -Name
 
     if ($daemonFiles.Count -eq 0)
     {
@@ -409,7 +475,7 @@ if ($Kill -eq -1)
     if ($null -eq (Get-Command fzf))
     {
         Write-Host "[WARNING] Fzf is not installed. Interactive kill prompt can not be used. Install it with 'winget install fzf' or kill with specified PID '-Kill <int>'" -ForegroundColor Yellow
-        exit 0
+        exit 1
     }
 
     $pipeNames = @()
@@ -423,51 +489,18 @@ if ($Kill -eq -1)
         $pipeNames += $displayName
         $pipeDictionary[$displayName] = @{
             target = $pipePID
-            json = $jsonPath
+            json = $_
         }
         Write-Host $name
     }
 
-    # Write-Host $daemonFileScriptBlock
-    $daemonFileScriptBlock = (Get-Command Write-DaemonFile).ScriptBlock.ToString()
-    # $daemonFileScriptBlock = $daemonFileScriptBlock -replace '`', '``' -replace '"', '`"' -replace '\$', '`$'
+    $previewCmd = "pwsh -NoProfile -File `"$PSCommandPath`" -Preview {}"
+    $selected = $pipeNames | fzf --prompt "Kill: " --preview $previewCmd --preview-window='top,80%' --delimiter='|' --with-nth='{1}' --ansi
 
-    $readCommand = @"
-if (`$null -eq (Get-Command bat))
-{
-    `$fileContent = { Get-Content `"$jsonPath`" }
-} else
-{
-    `$fileContent = { bat --color=always `"$jsonPath`" }
-}
 
-$daemonFileScriptBlock -TempFile `"$jsonPath`"
-`$fileContent
-"@
-    pwsh -NoProfile -Command $readCommand -- $jsonPath
-
-#     $readCommand = @"
-# if (`$null -eq (Get-Command bat))
-# {
-#     `$fileContent = { Get-Content {2} }
-# } else
-# {
-#     `$fileContent = { bat --color=always {2} }
-# }
-#
-# $daemonFileScriptBlock -TempFile {2}
-# `$fileContent
-# "@
-    # $bytes = [System.Text.Encoding]::Unicode.GetBytes($readCommand)
-    # $encodedPreviewCommand = [Convert]::ToBase64String($Bytes)
-
-    $previewCommand = "pwsh -NoProfile -EncodedCommand $encodedPreviewCommand"
-    $previewCommand = "pwsh -NoProfile -Command $readCommand {2}"
-    # $selectedDaemon = $pipeNames | fzf --prompt "Kill: " --preview "$previewCommand" --delimiter='|' --with-nth='{1}' --preview-label 'Temp File' --footer 'Kill Pwsh Pipe Daemon' --footer-label-pos 'center'
-
-    if ($null -ne $selectedDaemon)
+    if ($null -ne $selected)
     {
-        Stop-Daemon -DaemonPID $pipeDictionary[$selectedDaemon].target -DaemonTempFile "$pipeDictionary[$selectedDaemon].json"
+        Stop-Daemon -DaemonPID $pipeDictionary[$selectedDaemon].target -DaemonTempFile "$pipeDictionary[$selectedDaemon]"
     }
 
     exit 0
@@ -477,7 +510,6 @@ $daemonFileScriptBlock -TempFile `"$jsonPath`"
     if (Test-Path $daemonTempFile)
     {
         $daemonData = Get-Content -Path $daemonTempFile | ConvertFrom-Json
-        $proc = Get-Process -Id $Kill -ErrorAction SilentlyContinue
         Stop-Daemon $daemonTempFile $Kill
     } else
     {
@@ -487,6 +519,8 @@ $daemonFileScriptBlock -TempFile `"$jsonPath`"
     
     exit 0
 }
+
+# --- Main Daemon ---
 
 $Host.UI.RawUI.WindowTitle = 'pwsh-pipe-daemon'
 [Console]::Title = 'pwsh-pipe-daemon'
@@ -530,7 +564,6 @@ if (-not (Test-Path $LogDir))
 {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 }
-Start-Transcript -Path $LogPath -Append | Out-Null
 
 # Create temp file to track this daemon instance
 $daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
@@ -592,6 +625,7 @@ $pipe = $null
 $closed = $false
 
 Write-DaemonInfo
+Start-Transcript -Path $LogPath -Append | Out-Null
 
 # Update window title with pipe name and status
 [Console]::Title = "pwsh-pipe-daemon [$pipeName] - PID: $PID"
