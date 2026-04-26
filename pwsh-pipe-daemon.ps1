@@ -4,6 +4,7 @@ param(
     [int]$Log = 0,
     [string]$PipeName = "PWSH_COMMAND_PIPE",
     [switch]$Help,
+    [string]$Preview,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]] $RemainingArgs = @()
 )
@@ -101,8 +102,6 @@ $pipeName = $PipeName
 $powerShellInstances = @{}
 $activeCommands = @{}
 $daemonTempDir = Join-Path $env:TEMP 'pwsh-daemon-instances'
-
-# --- Functions ---
 
 function Get-DaemonPID
 {
@@ -273,7 +272,6 @@ function Write-DaemonFile
             }
         } else
         {
-            # Process is dead - get its state and clean up
             Write-Output-Color "${C_Red}PID: $($content.PID) | $($content.WindowTitle) | State: DEAD${C_Reset}"
             if ($content.Instances -and $content.Instances.Count -gt 0)
             {
@@ -287,10 +285,7 @@ function Write-DaemonFile
     } catch
     {
         Write-Output-Color "${C_Yellow}[WARNING] Failed to parse: $(Split-Path $TempFile -Leaf)${C_Reset}" 
-        return 0
     }
-
-    return 1
 }
 
 # Handle -List parameter to show running instances
@@ -399,7 +394,6 @@ if ($Preview)
     if (Test-Path $Preview)
     {
         Write-DaemonFile -TempFile $Preview -NoClean
-        Write-Output-Color "`n--- JSON Content ---"
         if (Get-Command bat -ErrorAction SilentlyContinue)
         { bat --color=always $Preview 
         } else
@@ -468,39 +462,106 @@ if ($Kill -eq -1)
 
     if ($daemonFiles.Count -eq 0)
     {
-        Write-Host "[INFO] There are no known daemon instances running. If any daemons are still running specify its PID in the command"
+        Write-Host "[INFO] Could not find any known daemons by metadata. If any daemons are still running specify its PID in the command"
         exit 0
-    }
-
-    if ($null -eq (Get-Command fzf))
-    {
-        Write-Host "[WARNING] Fzf is not installed. Interactive kill prompt can not be used. Install it with 'winget install fzf' or kill with specified PID '-Kill <int>'" -ForegroundColor Yellow
-        exit 1
     }
 
     $pipeNames = @()
     $pipeDictionary = @{}
-    $daemonFiles | ForEach-Object {
-        $jsonPath = Join-Path $env:TEMP 'pwsh-daemon-instances' $_
-        $name = (Get-Content $jsonPath | ConvertFrom-Json).PipeName
-        $pipePID = (Get-Content $jsonPath | ConvertFrom-Json).PID
-        $displayName = "$name - PID: $pipePID|$jsonPath"
 
-        $pipeNames += $displayName
-        $pipeDictionary[$displayName] = @{
-            target = $pipePID
-            json = $_
+    # if ($null -ne (Get-Command fzf))
+    if ($false)
+    {
+        $daemonFiles | ForEach-Object {
+            $jsonPath = Join-Path $env:TEMP 'pwsh-daemon-instances' $_
+            $name = (Get-Content $jsonPath | ConvertFrom-Json).PipeName
+            $pipePID = (Get-Content $jsonPath | ConvertFrom-Json).PID
+            $displayName = "$name - PID: $pipePID|$jsonPath"
+
+            $pipeNames += $displayName
+            $pipeDictionary[$displayName] = @{
+                target = $pipePID
+                json = $jsonPath
+            }
         }
-        Write-Host $name
+
+        $previewCmd = "pwsh -NoProfile -File `"$PSCommandPath`" -Preview {2}"
+        $selected = $pipeNames | fzf --prompt "Kill: " --footer "Select Daemon To Kill" --footer-label-pos "center" --preview $previewCmd --preview-window='top,80%' --delimiter='|' --with-nth='{1}' --ansi
+    }
+    else
+    {
+        Write-Host ""
+        Write-Host "─────────────────────────────────────────────────────────"
+        Write-Output-Color "                  ${C_Cyan}Select Daemon To Kill${C_Reset}"
+        $i = 0
+        $daemonFiles | ForEach-Object {
+            $jsonPath = Join-Path $env:TEMP 'pwsh-daemon-instances' $_
+            $name = (Get-Content $jsonPath | ConvertFrom-Json).PipeName
+            $pipePID = (Get-Content $jsonPath | ConvertFrom-Json).PID
+            $displayName = "$name - PID: $pipePID"
+
+            $pipeNames += $displayName
+            $pipeDictionary[$i] = @{
+                target = $pipePID
+                json = $jsonPath
+            }
+
+            Write-Host "─────────────────────────────────────────────────────────"
+            Write-Output-Color "Index: ${C_Cyan}$($i)${C_Reset} - ${C_Blue}$displayName${C_Reset}"
+            Write-Host "─────────────────────────────────────────────────────────"
+            Write-DaemonFile -TempFile $jsonPath
+            Write-Host ""
+            $i += 1
+        }
+
+        Write-Output-Color "${C_Gray}─────────────────────────────────────────────────────────${C_Reset}"
+        Write-Output-Color "${C_Blue}Select an Index: ${C_Cyan}0${C_Reset} - ${C_Cyan}$($i-1)${C_Reset}"
+        Write-Output-Color "${C_Gray}─────────────────────────────────────────────────────────${C_Reset}"
+
+        $selected = "Select"
+        while ($selected -notmatch '^\d+$')
+        {
+            $selected = Read-Host
+
+            if ($selected -match '^\s*([jJ])\s+[:=]?\s*(\d+)\s*$')
+            {
+                $idx = [int]$Matches[2]
+                if ($pipeDictionary.ContainsKey($idx))
+                {
+                    $previewFile = $pipeDictionary[$idx].json
+                    if (Get-Command bat -ErrorAction SilentlyContinue)
+                    { bat --color=always $previewFile 
+                    } else
+                    { Get-Content $previewFile 
+                    }
+                }
+                else
+                {
+                    Write-Output-Color "${C_Red}Index $idx not found${C_Reset}"
+                }
+                $selected = "Select"
+            }
+            elseif ($selected -match '^\d+$')
+            {
+                if (-not $pipeDictionary.ContainsKey([int]$selected))
+                {
+                    Write-Output-Color "${C_Red}Invalid Index: $selected${C_Reset}"
+                    $selected = "Select"
+                }
+            }
+            else
+            {
+                Write-Output-Color "${C_Red}Invalid Input${C_Reset}"
+                Write-Output-Color "View Metadata with: ${C_Green}j${C_Blue} <Index>${C_Reset}"
+                $selected = "Select"
+            }
+        }
     }
 
-    $previewCmd = "pwsh -NoProfile -File `"$PSCommandPath`" -Preview {}"
-    $selected = $pipeNames | fzf --prompt "Kill: " --preview $previewCmd --preview-window='top,80%' --delimiter='|' --with-nth='{1}' --ansi
-
-
-    if ($null -ne $selected)
+    if ($selected -match '^\d+$')
     {
-        Stop-Daemon -DaemonPID $pipeDictionary[$selectedDaemon].target -DaemonTempFile "$pipeDictionary[$selectedDaemon]"
+        $idx = [int]$selected
+        Stop-Daemon -DaemonPID $pipeDictionary[$idx].target -DaemonTempFile $pipeDictionary[$idx].json
     }
 
     exit 0
