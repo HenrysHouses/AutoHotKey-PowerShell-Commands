@@ -69,7 +69,7 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
 2. (Optional) Add the script directory to your system's `PATH`.
 3. Start the daemon in the background or a dedicated terminal.
 
-## Advanced Configuration (My Config)
+## Example scripts dependencies
 
 These additional scripts and tools build on the pipe daemon:
 
