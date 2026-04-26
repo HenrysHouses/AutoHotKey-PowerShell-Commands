@@ -71,19 +71,51 @@ function Write-Output-Color
     }
 }
 
-
 if ($Help)
 {
     Write-Host "Usage: pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -List              Show all running daemon instances and their status. Cleans broken instances when detected."
+    Write-Host "  -List              Show all running daemon instances and their status."
+    Write-Host "                     Cleans broken instances when detected."
     Write-Host "  -Log <Str>         Outputs the logs for the matching pipe daemon"
-    Write-Host "  -Kill              Gracefully terminate a daemon through selection via fzf"
+    Write-Host "  -Kill              Gracefully terminate a daemon through an interactive menu"
     Write-Host "  -Kill <PID>        Gracefully terminate a daemon instance by its Process ID."
     Write-Host "  -DisposeShell <ID> Gracefully terminate an instanced shell. (not implemented)"
     Write-Host "  -PipeName <Str>    Specify a custom pipe name (default: PWSH_COMMAND_PIPE)."
+    Write-Host "  -Preview <Str>     Preview the metadata from one of the daemon's json files."
+    Write-Host "                     Helper method for displaying data in fzf."
     Write-Host "  -Help              Show this help message."
+    Write-Host ""
+    Write-Host "Messages:"
+    Write-Host "  Main Behaviour:"
+    Write-Host "    This daemon is meant to invoke short term commands, reusing available powershell"
+    Write-Host "    instances for quick executuion. Since this is its main purpose, it prefers to not"
+    Write-Host "    invoke duplicate indentical commands. Instead if one is detected it will act as"
+    Write-Host "    a toggle. cancelling the command instead if a duplicate is detected. This behaviour"
+    Write-Host "    can be altered with attaching flags to the message. For logging, tracking and"
+    Write-Host "    debugging purposes names can be attached to messages in addition to altering behaviour."
+    Write-Host ""
+    Write-Host "  Argument Prefixes:"
+    Write-Host "    <string>                             Default message. No arguments."
+    Write-Host "    __FROM__:<string>``n<string>          Includes the name / source in the logs"
+    Write-Host "                                         The new line character acts as a delimiter"
+    Write-Host "                                         between the name and the command string."
+    Write-Host "    __CANCEL__:<string>                  Cancels any matching commands."
+    Write-Host "    __RESTART__:<string>                 requests an active command to be"
+    Write-Host "                                         cancelled and reinvoked"
+    Write-Host ""
+    Write-Host "    Example 0: Default Message"
+    Write-Host "      yt-dlp https://some-link.com/my-audio-stream"
+    Write-Host ""
+    Write-Host "    Example 1: Named Message"
+    Write-Host "      __FROM__:Quake Terminal``nffplay https://some-link.com/my-audio-stream"
+    Write-Host ""
+    Write-Host "    Example 2: Message With Argument"
+    Write-Host "      __RESTART__:ffplay https://some-link.com/my-audio-stream"
+    Write-Host ""
+    Write-Host "    Example 3: Named Message With Argument"
+    Write-Host "      __FROM__:AutoHotKey Script``n__CANCEL__ffplay https://some-link.com/my-audio-stream"
     Write-Host ""
     Write-Host "Usage:"
     Write-Host "  The daemon acts as a singleton based on the pipe name. It writes to temp files to track instances"
@@ -91,7 +123,8 @@ if ($Help)
     Write-Host "  Running the daemon in the background will allow you to use pwsh-msg.ps1 to send commands through" 
     Write-Host "  pipes to execute them within the daemon. This can also be utilized by anything which can write"
     Write-Host "  to the pipe the daemon is listning on such as AHK, powershell or anything else."
-    Write-Host "  This enabled near instant execution of scripts and terminal commands from external sources"
+    Write-Host "  This enables near instant execution of scripts and terminal commands from external sources"
+    Write-Host "  pwsh-msg.ps1 is a short hand utility for sending messages. Mainly for testing, debugging, and automation."
     exit 0
 }
 
@@ -938,6 +971,7 @@ try
             $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
             # Write-Host "$time - [Messager] Connected"
             $reader = [System.IO.StreamReader]::new($pipe)
+            $buffer = New-Object byte[] 1024
 
             while ($pipe)
             {
@@ -955,7 +989,6 @@ try
                     break
                 }
 
-                $buffer = New-Object byte[] 1024
                 $readTask = $pipe.ReadAsync($buffer, 0, $buffer.Length, $token)
 
                 while (-not $readTask.Wait(10, $token))
@@ -975,31 +1008,26 @@ try
                     # Extract sender name if present (before cleaning control characters)
                     $senderName = $null
                     $isRestart = $false
+                    $isCancel = $false
 
-                    $pattern = '^(?:__FROM__:([^\r\n]+)[\r\n]+)?(?:__RESTART__:(?:\r?\n)?([\s\S]+)|([\s\S]+))$'
-
-                    if ($rawMessage -match $pattern)
+                    if ($rawMessage -match '^__FROM__:([^\r\n]+)[\r\n]+([\s\S]+)$')
                     {
-                        if ($matches[1])
-                        { $senderName = $matches[1] 
-                        }
-
-                        if ($matches[2])
-                        {
-                            $isRestart = $true
-                            $rawMessage = $matches[2]
-                        } else
-                        {
-                            $rawMessage = $matches[3]
-                        }
-
-                        $rawMessage = $rawMessage.TrimStart("`r","`n"," ")
-                        $message = [regex]::Replace($rawMessage, '[\p{C}]', '')
-                    } else
-                    {
-                        # fallback: sanitize original
-                        $message = [regex]::Replace($rawMessage, '[\p{C}]', '')
+                        $senderName = $matches[1]
+                        $rawMessage = $matches[2]
                     }
+
+                    if ($rawMessage -match '^__RESTART__:([\s\S]+)$')
+                    {
+                        $isRestart = $true
+                        $rawMessage = $matches[1]
+                    } elseif ($rawMessage -match '^__CANCEL__:([\s\S]+)$')
+                    {
+                        $isCancel = $true
+                        $rawMessage = $matches[1]
+                    }
+
+                    $rawMessage = $rawMessage.TrimStart("`r", "`n", " ")
+                    $message = [regex]::Replace($rawMessage, '[\p{C}]', '')
 
                     $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
                     $currentMessage = "$time - $message"
@@ -1035,9 +1063,15 @@ try
                                 }
                                 $ps = Get-PowerShellInstance
                                 InvokeMessage -powershell $ps -msg $message
+                            } elseif ($isCancel)
+                            {
+                                # Already cancelled above, nothing more to do
                             } else
                             {
                             }
+                        } elseif ($isCancel)
+                        {
+                            Write-Host "$time - [INFO] Cancel requested for '$message' but it was not running." -ForegroundColor Gray
                         } elseif ($message -eq "Close Pipe")
                         {
                             $time = [DateTime]::UtcNow.ToString("HH:mm:ss.fff")
@@ -1122,15 +1156,29 @@ try
     }
     if ($reader)
     {
-        $reader.Close()
+        $reader.Dispose()
     }
     $cancellationTokenSource.Dispose()
 
+    # Dispose of all PowerShell instances in the pool
+    foreach ($instanceId in $powerShellInstances.Keys)
+    {
+        try {
+            $powerShellInstances[$instanceId].Shell.Stop()
+            $powerShellInstances[$instanceId].Shell.Dispose()
+        } catch { }
+    }
+    $powerShellInstances.Clear()
+
     foreach ($cmd in $activeCommands.Keys)
     {
-        $activeCommands[$cmd].PowerShell.Stop()
-        $activeCommands[$cmd].PowerShell.Dispose()
+        try {
+            $activeCommands[$cmd].PowerShell.Stop()
+            $activeCommands[$cmd].PowerShell.Dispose()
+        } catch { }
     }
+    $activeCommands.Clear()
+
     $runspacePool.Dispose()
     Stop-Transcript | Out-Null
 }

@@ -4,12 +4,13 @@ param(
     [string]$Name,
     [string]$PipeName = "PWSH_COMMAND_PIPE",
     [switch]$Restart,
+    [switch]$Cancel,
     [switch]$Help
 )
 
 if ($Help)
 {
-    Write-Host "Usage: pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] [-Help]" -ForegroundColor Cyan
+    Write-Host "Usage: pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] [-Cancel] [-Help]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -Command <Str>   The PowerShell command or script block to execute on the daemon. `n                   Requesting an identical command will automatically cancel the command that is running instead of executing a copy. Essentially a toggle."
@@ -87,6 +88,9 @@ if ($sshSession)
 if ($Restart)
 {
     $Command = "__RESTART__:$Command"
+} elseif ($Cancel)
+{
+    $Command = "__CANCEL__:$Command"
 }
 
 # Format message with sender name if available
