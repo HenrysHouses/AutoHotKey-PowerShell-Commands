@@ -164,7 +164,7 @@ if ($Help)
     Write-Host "    can be altered with attaching flags to the message. For logging, tracking and"
     Write-Host "    debugging purposes names can be attached to messages in addition to altering behaviour."
     Write-Host ""
-    Write-Host "  Argument Prefixes:"
+    Write-Host "  Message Prefixes:"
     Write-Host "    <string>                             Default message. No arguments."
     Write-Host "    __FROM__:<string>``n<string>          Includes the name / source in the logs"
     Write-Host "                                         The new line character acts as a delimiter"
