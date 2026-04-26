@@ -16,7 +16,6 @@ pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]
 - `-List`: Show all running daemon instances and their status. Automatically cleans up broken instances when detected.
 - `-Log <str>`: Outputs the logs for the matching pipe daemon *(not implemented yet)*
 - `-Kill <PID>`: Gracefully terminate a daemon instance by its Process ID.
-- `-Help`: Show the built-in help message.
 - `-PipeName <Str>`: Specify a custom pipe name (default: `PWSH_COMMAND_PIPE`).
 - `-Help`: Show the built-in help message.
 
