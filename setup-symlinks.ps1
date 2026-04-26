@@ -1,4 +1,4 @@
-$sourceBase = Join-Path $PSScriptRoot "myConfig"
+$sourceBase = Join-Path $PSScriptRoot "ExampleScripts"
 $sourceDirs = @(
     $PSScriptRoot,
     $sourceBase,
@@ -6,7 +6,8 @@ $sourceDirs = @(
     (Join-Path $sourceBase "ssh"),
     (Join-Path $sourceBase "wlines")
 )
-$targetDir = "C:\Users\Henri\bin"
+# $targetDir = "$env:USERPROFILE\bin"
+$targetDir = "$env:USERPROFILE\bin\pwsh-daemon-examples"
 $allowedExtensions = @('.ps1', '.exe', '.sh')
 
 if (-not (Test-Path $targetDir)) {

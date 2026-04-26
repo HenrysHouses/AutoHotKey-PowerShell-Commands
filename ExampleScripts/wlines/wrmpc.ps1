@@ -598,28 +598,24 @@ function Get-SearchQuery
     return ""
 }
 
-# Handle Play/Pause
 function Invoke-PlayPause
 {
     # Write-Log "Toggling play/pause" "INFO"
     Invoke-RmpcCommand "rmpc togglepause" "play-pause"
 }
 
-# Handle Skip
 function Invoke-Skip
 {
     # Write-Log "Skipping to next track" "INFO"
     Invoke-RmpcCommand "rmpc next" "skip"
 }
 
-# Handle Previous
 function Invoke-Previous
 {
     # Write-Log "Playing previous track" "INFO"
     Invoke-RmpcCommand "rmpc prev" "previous"
 }
 
-# Handle Add local song
 function Invoke-AddLocal
 {
     $song = Get-LocalSongSelection
@@ -632,7 +628,6 @@ function Invoke-AddLocal
     Invoke-RmpcCommand "rmpc add `"$($song.Path)`"" "add-local"
 }
 
-# Handle Play Next local song
 function Invoke-PlayNextLocal
 {
     $song = Get-LocalSongSelection
@@ -645,7 +640,6 @@ function Invoke-PlayNextLocal
     Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc add -p `$((current_que + 1)) `"$($song.Path)`"" "play-next-local"
 }
 
-# Handle Play Now local song
 function Invoke-PlayNowLocal
 {
     $song = Get-LocalSongSelection
@@ -658,7 +652,6 @@ function Invoke-PlayNowLocal
     Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc add -p `$((current_que + 1)) `"$($song.Path)`"; sleep 0.5; rmpc next" "play-now-local"
 }
 
-# Handle Add YouTube link
 function Invoke-AddYouTubeLink
 {
     $link = Get-YouTubeLink "add"
@@ -680,7 +673,6 @@ function Invoke-AddYouTubeLink
     Invoke-RmpcCommand "rmpc addyt `"$link`"" "add-yt-link"
 }
 
-# Handle Play Next YouTube link
 function Invoke-PlayNextYouTubeLink
 {
     $link = Get-YouTubeLink "play-next"
@@ -702,7 +694,6 @@ function Invoke-PlayNextYouTubeLink
     Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc addyt -p `$((current_que + 1)) `"$link`"" "play-next-yt-link"
 }
 
-# Handle Play Now YouTube link
 function Invoke-PlayNowYouTubeLink
 {
     $link = Get-YouTubeLink "play-now"
@@ -725,7 +716,6 @@ function Invoke-PlayNowYouTubeLink
     Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc addyt -p `$((current_que + 1)) `"$link`"; sleep 0.5; rmpc next" "play-now-yt-link"
 }
 
-# Handle Add search
 function Invoke-AddSearch
 {
     $query = Get-SearchQuery "youtube"
@@ -761,7 +751,6 @@ fi
     Invoke-RmpcCommand $searchCmd "add-search"
 }
 
-# Handle Play Next search
 function Invoke-PlayNextSearch
 {
     $query = Get-SearchQuery "youtube"
@@ -798,7 +787,6 @@ fi
     Invoke-RmpcCommand $searchCmd "play-next-search"
 }
 
-# Handle Play Now search
 function Invoke-PlayNowSearch
 {
     $query = Get-SearchQuery "youtube"
@@ -842,7 +830,6 @@ rmpc play 2>/dev/null || true
     Invoke-RmpcCommand $searchCmd "play-now-search"
 }
 
-# Handle Current song display
 function Invoke-ShowCurrent
 {
     # Write-Log "Getting current song" "INFO"
@@ -856,7 +843,6 @@ echo `$name
     Invoke-RmpcCommand $currentCmd "current-song"
 }
 
-# Handle Volume
 function Invoke-VolumeControl
 {
     $volume = Get-VolumeSelection
@@ -870,7 +856,6 @@ function Invoke-VolumeControl
     Invoke-RmpcCommand "rmpc volume $volume" "volume-control"
 }
 
-# Handle Download YouTube
 function Invoke-DownloadYouTube
 {
     $link = Get-YouTubeLink "download"
@@ -891,7 +876,6 @@ function Invoke-DownloadYouTube
     Invoke-RmpcCommand "cd ~/Music/youtube && yt-dlp `"$link`"" "download-yt"
 }
 
-# Handle Restart MPD
 function Invoke-RestartMPD
 {
     Write-Log "Attempting to restart MPD" "INFO"
@@ -908,7 +892,6 @@ function Invoke-RestartFfplay
     pwsh-msg -Command "ffplay-keeper" -Restart -Name "Rmpc Control" -PipeName "PWSH_COMMAND_PIPE"
 }
 
-# Main execution
 function Invoke-Main
 {
     $uiMethod = if ($script:UseFzf)
@@ -928,7 +911,6 @@ function Invoke-Main
         # Write-Log "Local mode" "INFO"
     }
     
-    # Check WSL
     # if (-not (Test-WSLConnection))
     # {
     #     Write-Log "Cannot connect to WSL" "ERROR"
@@ -936,7 +918,6 @@ function Invoke-Main
     # }
     # Write-Log "WSL connection OK" "SUCCESS"
     
-    # Mount CachyOS drive if needed
     # Write-Log "Checking CachyOS drive mount..." "INFO"
     if (-not (Mount-CachyOSDrive))
     {
@@ -964,7 +945,6 @@ function Invoke-Main
         # Write-Log "MPD daemon running" "SUCCESS"
     }
     
-    # Show action menu
     $action = Get-ActionSelection
     
     if ([string]::IsNullOrEmpty($action))

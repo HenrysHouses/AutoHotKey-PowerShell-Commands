@@ -72,17 +72,41 @@ function Start-ffplayStream
     pwsh-msg -Command "ffplay-keeper" -Restart -Name "Rmpc WSL" -PipeName "PWSH_COMMAND_PIPE"
 }
 
-# Detect if this is a play command and launch ffplay
-$Command = $Command.Trim()
-$isPlayCommand = ($Command -match "togglepause|next|prev|play|addyt|searchyt") -and ($Command -notmatch "status|queue|current")
-
-# Write-Host "[DEBUG] Command received: '$Command'" -ForegroundColor Cyan
-# Write-Host "[DEBUG] Is play command: $isPlayCommand" -ForegroundColor Cyan
-
-if ($isPlayCommand)
+# Function to stop ffplay stream
+function Stop-ffplayStream
 {
-    # Write-Host "[DEBUG] Attempting to start ffplay..." -ForegroundColor Green
+    pwsh-msg -Command "ffplay-keeper" -Cancel -Name "Rmpc WSL" -PipeName "PWSH_COMMAND_PIPE"
+}
+
+# Detect playback commands
+$Command = $Command.Trim()
+$isPlay = $Command -match "^(play|next|prev|addyt|searchyt)"
+$isStop = $Command -match "^stop"
+$isPause = $Command -match "^pause"
+$isToggle = $Command -match "^togglepause"
+
+if ($isPlay)
+{
     Start-ffplayStream | Out-Null
+} elseif ($isStop -or $isPause)
+{
+    Stop-ffplayStream | Out-Null
+} elseif ($isToggle)
+{
+    # Check current MPD state to decide whether to start or stop stream
+    try {
+        $mpdStatus = wsl -u $WSLUser -e rmpc status 2>&1
+        if ($mpdStatus -match "playing") {
+            # About to pause
+            Stop-ffplayStream | Out-Null
+        } else {
+            # About to play
+            Start-ffplayStream | Out-Null
+        }
+    } catch {
+        # Fallback to restart if status check fails
+        Start-ffplayStream | Out-Null
+    }
 }
 
 # Execute command in WSL
