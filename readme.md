@@ -14,11 +14,13 @@ pwsh-pipe-daemon.ps1 [-List] [-Kill <PID>] [-PipeName <String>] [-Help]
 
 **Options:**
 - `-List`: Show all running daemon instances and their status. Automatically cleans up broken instances when detected.
-- `-Log <str>`: Outputs the logs for the matching pipe daemon *(not implemented yet)*
+- `-Log <int>`: Outputs a number of logs from the first found daemon.
+- `-Log <str> <int>`: Outputs a number of logs for the matching pipe daemon. *(not implemented)*
+- `-Kill`: Gracefully terminate a daemon instance by with an interactive menu.
 - `-Kill <PID>`: Gracefully terminate a daemon instance by its Process ID.
-- `-PipeName <Str>`: Specify a custom pipe name (default: `PWSH_COMMAND_PIPE`).
+- `-PipeName <str>`: Specify a custom pipe name (default: `PWSH_COMMAND_PIPE`).
+- `-Preview <str>`: Print a preview of the current state of temp file. Used for fzf preview in interactive kill menu
 - `-Help`: Show the built-in help message.
-
 
 **Features:**
 - **Instance Reuse:** Creates and manages a pool of up to 5 PowerShell instances to minimize overhead.
@@ -72,6 +74,7 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
 
 - [ ] Improve setup-symlinks.sh to have better ux
 - [ ] `-List` should detect PIDs of untracked daemons
+- [ ] Finish `-Log` to target specific temp file / daemon
 - [ ] `-Kill` should allow Killing untracked daemons with confirmation / notice
 - [ ] Add a flag to intentionally cleanup daemons that lacks tempfiles. (This is treating the cause rather than fixing the issue, but good to have in case something goes wrong)
 - [ ] Improve runspaces logic. (i didnt initially understand how to use them correctly)
