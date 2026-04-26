@@ -69,6 +69,14 @@ pwsh-msg.ps1 -Command <String> [-Name <String>] [-PipeName <String>] [-Restart] 
 2. (Optional) Add the script directory to your system's `PATH`.
 3. Start the daemon in the background or a dedicated terminal.
 
+## TODO
+
+-[] Improve setup-symlinks.sh to have better ux
+-[] `-List` should detect PIDs of untracked daemons
+-[] `-Kill` should allow Killing untracked daemons with confirmation / notice
+-[] Add a flag to intentionally cleanup daemons that lacks tempfiles. (This is treating the cause rather than fixing the issue, but good to have in case something goes wrong)
+-[] Improve runspaces logic. (i didnt initially understand how to use them correctly)
+
 ## Example scripts dependencies
 
 These additional scripts and tools build on the pipe daemon:
