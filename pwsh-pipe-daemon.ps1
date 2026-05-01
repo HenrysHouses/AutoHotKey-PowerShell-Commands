@@ -938,7 +938,15 @@ function IdleUpdate
     $timeSinceChange = $now - $script:lastQueueChangeTime
     $timeSinceMaintenance = $now - $script:lastMaintenanceTime
 
-    if ($timeSinceChange -gt $maintenanceIdleThreshold -and $timeSinceMaintenance -gt $maintenanceInterval)
+    if ($timeSinceChange -gt $maintenanceIdleThreshold -and $script:lastQueueChangeTime -lt $now)
+    {
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+        $script:lastQueueChangeTime = [DateTime]::MaxValue
+        Write-Host "$($now.ToString('HH:mm:ss.fff')) - [MAINTENANCE] Light GC complete (Idle)." -ForegroundColor Gray
+    }
+
+    if ($timeSinceMaintenance -gt $maintenanceInterval)
     {
         Perform-Maintenance
     }

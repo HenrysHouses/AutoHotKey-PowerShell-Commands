@@ -5,9 +5,18 @@ $sourceDirs = @(
     (Join-Path $sourceBase "wsl"),
     (Join-Path $sourceBase "ssh"),
     (Join-Path $sourceBase "wlines")
+    (Join-Path $sourceBase "other")
 )
 # $targetDir = "$env:USERPROFILE\bin"
 $targetDir = "$env:USERPROFILE\bin\pwsh-daemon-examples"
+if ($null -ne $Args[0])
+{
+    if (Test-Path "$env:USERPROFILE\$($Args[0])")        
+    {
+        Write-Host "using defined dir"
+        $targetDir = "$env:USERPROFILE\$($Args[0])"
+    }
+}
 $allowedExtensions = @('.ps1', '.exe', '.sh')
 
 if (-not (Test-Path $targetDir)) {

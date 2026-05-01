@@ -1,0 +1,3 @@
+- Update instance logic to use runspaces better
+- comamnds with big outputs will be blocking recieving other commands. 
+- handle crashed / non responsive pwsh instances that may leak.

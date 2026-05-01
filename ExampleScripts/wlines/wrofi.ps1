@@ -27,7 +27,7 @@ $textforegroundBlurred = "#f2f2f8"
 $textbackgroundBlurred = "#9beb2e00"
 $borderColorBlurred = "#9beb2e"
 
-$font = "JetBrainsMono NF"
+$font = "JetBrainsMono NFM Regular"
 $fontsize = 21
 $padding = 4
 $width = 600
@@ -38,37 +38,46 @@ if ($Opaque)
 {
     if ($p)
     {
-        if ([string]::IsNullOrWhiteSpace($InputContent)) {
+        if ([string]::IsNullOrWhiteSpace($InputContent))
+        {
             $output = wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $textforeground -border -bp $padding -bc $borderColor -f $font -fs $fontsize -p $p 2>&1
-        } else {
+        } else
+        {
             $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $textforeground -border -bp $padding -bc $borderColor -f $font -fs $fontsize -p $p 2>&1
         }
-            Write-Output $output
+        Write-Output $output
     } else
     {
-        if ([string]::IsNullOrWhiteSpace($InputContent)) {
+        if ([string]::IsNullOrWhiteSpace($InputContent))
+        {
             $output = wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $textforeground -border -bp $padding -bc $borderColor -f $font -fs $fontsize 2>&1
-        } else {
+        } else
+        {
             $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackground -fg $mainforeground -sbg $selectedbackground -sfg $selectedforeground -tbg $textbackground -tfg $textforeground -border -bp $padding -bc $borderColor -f $font -fs $fontsize 2>&1
         }
-            Write-Output $output
+        Write-Output $output
     }
-} else {
+} else
+{
     if ($p)
     {
-        if ([string]::IsNullOrWhiteSpace($InputContent)) {
+        if ([string]::IsNullOrWhiteSpace($InputContent))
+        {
             $output = wlines -px $padding -wx $width -bg $mainbackgroundBlurred -fg $mainforegroundBlurred -sbg $selectedbackgroundBlurred -sfg $selectedforegroundBlurred -tbg $textbackgroundBlurred -tfg $textforegroundBlurred -blur -border -bp $padding -bc $borderColorBlurred -f $font -fs $fontsize -p $p 2>&1
-        } else {
+        } else
+        {
             $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackgroundBlurred -fg $mainforegroundBlurred -sbg $selectedbackgroundBlurred -sfg $selectedforegroundBlurred -tbg $textbackgroundBlurred -tfg $textforegroundBlurred -blur -border -bp $padding -bc $borderColorBlurred -f $font -fs $fontsize -p $p 2>&1
         }
-            Write-Output $output
+        Write-Output $output
     } else
     {
-        if ([string]::IsNullOrWhiteSpace($InputContent)) {
+        if ([string]::IsNullOrWhiteSpace($InputContent))
+        {
             $output = wlines -px $padding -wx $width -bg $mainbackgroundBlurred -fg $mainforegroundBlurred -sbg $selectedbackgroundBlurred -sfg $selectedforegroundBlurred -tbg $textbackgroundBlurred -tfg $textforegroundBlurred -blur -border -bp $padding -bc $borderColorBlurred -f $font -fs $fontsize 2>&1
-        } else {
+        } else
+        {
             $output = $InputContent | wlines -px $padding -wx $width -bg $mainbackgroundBlurred -fg $mainforegroundBlurred -sbg $selectedbackgroundBlurred -sfg $selectedforegroundBlurred -tbg $textbackgroundBlurred -tfg $textforegroundBlurred -blur -border -bp $padding -bc $borderColorBlurred -f $font -fs $fontsize 2>&1
         }
-            Write-Output $output
+        Write-Output $output
     }
 }

@@ -70,35 +70,9 @@ $WlinesWrapper = if ($fzf)
 $IsRemoteSession = -not [string]::IsNullOrWhiteSpace($env:SSH_CLIENT) -or `
     -not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION) -or `
     -not [string]::IsNullOrWhiteSpace($env:SSH_TTY)
-if ($IsRemoteSession)
-{
-    Write-Host "SSH session detected - GlazeWM management will execute on local machine via pwsh-daemon"
-}
 
-function Get-SSHSourceName
-{
-    # Extract SSH connection source and format it
-    if ($env:SSH_CONNECTION)
-    {
-        # Format: "client_ip client_port server_ip server_port"
-        $parts = $env:SSH_CONNECTION -split ' '
-        if ($parts.Count -ge 1)
-        {
-            return "ssh:$($parts[0])"
-        }
-    } elseif ($env:SSH_CLIENT)
-    {
-        # Format: "client_ip client_port"
-        $parts = $env:SSH_CLIENT -split ' '
-        if ($parts.Count -ge 1)
-        {
-            return "ssh:$($parts[0])"
-        }
-    }
-    return $null
-}
-
-Add-Type @"
+if (-not ([Ref].Assembly.GetType('WinEnum'))) {
+    Add-Type -TypeDefinition @"
 using System;
 using System.Text;
 using System.Runtime.InteropServices;
@@ -117,19 +91,10 @@ public class WinEnum {
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    public static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
     public static extern bool IsIconic(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
-
-    [DllImport("kernel32.dll")]
-    public static extern bool CloseHandle(IntPtr hObject);
+    public static extern int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -144,7 +109,15 @@ public class WinEnum {
     }
 
     [DllImport("user32.dll")]
-    public static extern int GetWindowTextLength(IntPtr hWnd);
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    public const int SW_HIDE = 0;
+    public const int SW_SHOWNORMAL = 1;
+    public const int SW_SHOW = 5;
+    public const int SW_RESTORE = 9;
 
     public static List<WindowInfo> GetAllWindowsStatic()
     {
@@ -192,205 +165,6 @@ public class WindowInfo
     public int Y { get; set; }
 }
 "@
-
-Add-Type @"
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-
-public class Win32 {
-    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
-
-    [DllImport("kernel32.dll")]
-    public static extern bool CloseHandle(IntPtr hObject);
-}
-"@
-
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-
-public class FocusHelper {
-    [DllImport("user32.dll")]
-    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsIconic(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT
-    {
-        public int left;
-        public int top;
-        public int right;
-        public int bottom;
-    }
-
-    // ShowWindow constants
-    public const int SW_HIDE = 0;
-    public const int SW_SHOWNORMAL = 1;
-    public const int SW_SHOW = 5;
-    public const int SW_RESTORE = 9;
-}
-"@
-
-function Get-AllWindows
-{
-    $allWindows = [WinEnum]::GetAllWindowsStatic()
-    
-    $results = @()
-    foreach ($window in $allWindows)
-    {
-        $results += [PSCustomObject]@{
-            Handle      = $window.Handle
-            Title       = $window.Title
-            IsVisible   = $window.IsVisible
-            IsMinimized = $window.IsMinimized
-            IsHidden    = (-not $window.IsVisible) -or $window.IsMinimized
-            X           = $window.X
-            Y           = $window.Y
-        }
-    }
-
-    return $results
-}
-
-function Get-UnmanagedWindows
-{
-    param($GlazeWindows, $GlazeWorkspaces)
-
-    $glazeTitles = $GlazeWindows | ForEach-Object { $_.title }
-    $allWindows = Get-AllWindows
-    $results = @()
-
-    # System window patterns to exclude (case-insensitive)
-    $systemPatterns = @(
-        'Default IME', 'MSCTFIME UI', 'CiceroUIWndFrame',
-        'GDI\+ Window', 'DesktopWindowXamlSource',
-        'Hidden Window', 'MessageWindow',
-        'DDE Server Window', 'BroadcastListenerWindow',
-        'SystemResourceNotifyWindow', 'MediaContextNotificationWindow',
-        'NvContainerWindowClass', 'DWM Notification',
-        'Program Manager', 'WISPTIS',
-        'Windows Input Experience', 'Input.*',
-        'MS_WebcheckMonitor', 'BluetoothNotificationAreaIconWindowClass',
-        'MiracastConnectionWindow', 'Quick Settings',
-        'Start', 'Search', 'New notification', 'Battery',
-        'Menu', 'Shell.*', 'Task Host', 'OmApSvcBroker',
-        'Windows.*Experience', 'NvSvc', 'UxdService', 'RealtekAudioBackgroundProcessClass',
-        'SecurityHealthSystray', 'QTrayIconMessageWindow', 'GlobalHiddenWindow',
-        'Windows Push Notifications', 'Discord Overlay Input Trap',
-        '^_q_titlebar$', '\.NET-BroadcastEventWindow', 'Progress',
-        'Firefox Media Keys', 'WinEventWindow', 'EXPLORER'
-    )
-
-    # Ignored windows list
-    $ignoredPatterns = @(
-        'Untitled',
-        'CrossDeviceResumeWindow',
-        'Windows Default Lock Screen',
-        '\.ahk - AutoHotkey',
-        '^yasb$', '^YasbBar$',
-        'Buttery Taskbar'
-    )
-
-    foreach ($window in $allWindows)
-    {
-        # Skip if already managed by Glaze
-        if ($window.Title -in $glazeTitles)
-        {
-            continue
-        }
-
-        # Skip system windows
-        $isSystemWindow = $false
-        foreach ($pattern in $systemPatterns)
-        {
-            if ($window.Title -match "^$pattern")
-            {
-                $isSystemWindow = $true
-                break
-            }
-        }
-
-        if ($isSystemWindow)
-        {
-            continue
-        }
-
-        # Skip ignored windows
-        $isIgnored = $false
-        foreach ($pattern in $ignoredPatterns)
-        {
-            if ($window.Title -match $pattern)
-            {
-                $isIgnored = $true
-                break
-            }
-        }
-
-        if ($isIgnored)
-        {
-            continue
-        }
-
-        $statusParts = @()
-        if ($window.IsMinimized)
-        { $statusParts += 'MINIMIZED' 
-        }
-        if (-not $window.IsVisible)
-        { $statusParts += 'HIDDEN' 
-        }
-        $statusStr = if ($statusParts.Count -gt 0)
-        { " [$($statusParts -join ' | ')]" 
-        } else
-        { '' 
-        }
-
-        $results += [PSCustomObject]@{
-            ItemId          = ''
-            Label           = "Unmanaged | $($window.Title)$statusStr"
-            WindowHandle    = $window.Handle
-            Managed         = $false
-            IsHidden        = (-not $window.IsVisible) -or $window.IsMinimized
-            IsMinimized     = $window.IsMinimized
-            IsVisible       = $window.IsVisible
-            Title           = $window.Title
-            Workspaces     = $GlazeWorkspaces
-        }
-    }
-
-    return $results
 }
 
 function Get-GlazeState
@@ -398,15 +172,8 @@ function Get-GlazeState
     $workspaceResponse = glazewm query workspaces | ConvertFrom-Json
     $windowResponse = glazewm query windows | ConvertFrom-Json
 
-    if (-not $workspaceResponse.success)
-    {
-        throw 'Failed to query GlazeWM workspaces.'
-    }
-
-    if (-not $windowResponse.success)
-    {
-        throw 'Failed to query GlazeWM windows.'
-    }
+    if (-not $workspaceResponse.success) { throw 'Failed to query GlazeWM workspaces.' }
+    if (-not $windowResponse.success) { throw 'Failed to query GlazeWM windows.' }
 
     return [PSCustomObject]@{
         Workspaces = @($workspaceResponse.data.workspaces)
@@ -414,117 +181,46 @@ function Get-GlazeState
     }
 }
 
-function Resolve-WorkspaceForWindow
-{
-    param(
-        [Parameter(Mandatory)]$Window,
-        [Parameter(Mandatory)]$Workspaces,
-        [Parameter(Mandatory)]$Windows
-    )
-
-    $workspaceMap = @{}
-    foreach ($ws in $Workspaces)
-    {
-        $workspaceMap[$ws.id] = $ws
-    }
-
-    $windowMap = @{}
-    foreach ($w in $Windows)
-    {
-        $windowMap[$w.id] = $w
-    }
-
-    $currentParentId = $Window.parentId
-
-    while ($true)
-    {
-        if ($workspaceMap.ContainsKey($currentParentId))
-        {
-            return $workspaceMap[$currentParentId]
-        }
-
-        if (-not $windowMap.ContainsKey($currentParentId))
-        {
-            return $null
-        }
-
-        $currentParentId = $windowMap[$currentParentId].parentId
-    }
-}
-
-function Get-WorkspaceForUnmanagedWindow
-{
-    param(
-        [Parameter(Mandatory)]$WindowPosition,
-        [Parameter(Mandatory)]$Workspaces
-    )
-
-    # Simple heuristic: return the first workspace (GlazeWM typically manages workspaces per monitor)
-    # In most cases, returning the first displayed workspace is a good default
-    if ($Workspaces.Count -gt 0)
-    {
-        $displayedWorkspace = $Workspaces | Where-Object { $_.isDisplayed } | Select-Object -First 1
-        if ($displayedWorkspace)
-        {
-            return $displayedWorkspace
-        }
-        return $Workspaces[0]
-    }
-
-    return $null
-}
-
 function Get-TabItems
 {
     $state = Get-GlazeState
+    $glazeWorkspaces = $state.Workspaces
+    $glazeWindows = $state.Windows
+
     $workspaceMap = @{}
-    foreach ($workspace in $state.Workspaces)
+    foreach ($ws in $glazeWorkspaces) { $workspaceMap[$ws.id] = $ws }
+
+    $windowMap = @{}
+    foreach ($w in $glazeWindows) { $windowMap[$w.id] = $w }
+
+    $glazeTitles = [System.Collections.Generic.HashSet[string]]::new()
+    $items = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($window in $glazeWindows)
     {
-        $workspaceMap[$workspace.id] = $workspace
-    }
+        if ($window.title) { [void]$glazeTitles.Add($window.title) }
 
-    $items = foreach ($window in $state.Windows)
-    {
-        $workspace = Resolve-WorkspaceForWindow `
-            -Window $window `
-            -Workspaces $state.Workspaces `
-            -Windows $state.Windows
-
-        if ($null -eq $workspace)
-        {
-            continue
-        }
-        $workspaceLabel = if ([string]::IsNullOrWhiteSpace($workspace.displayName))
-        {
-            $workspace.name
-        } else
-        {
-            $workspace.displayName
+        # Resolve Workspace
+        $workspace = $null
+        $currentParentId = $window.parentId
+        while ($true) {
+            if ($workspaceMap.ContainsKey($currentParentId)) { $workspace = $workspaceMap[$currentParentId]; break }
+            if (-not $windowMap.ContainsKey($currentParentId)) { break }
+            $currentParentId = $windowMap[$currentParentId].parentId
         }
 
-        $parts = @($window.processName)
-        if (-not [string]::IsNullOrWhiteSpace($window.title))
-        {
-            $parts += $window.title
-        }
-        $parts += "Workspace $workspaceLabel"
+        if ($null -eq $workspace) { continue }
+        
+        $workspaceLabel = if ([string]::IsNullOrWhiteSpace($workspace.displayName)) { $workspace.name } else { $workspace.displayName }
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $parts.Add($window.processName)
+        if (-not [string]::IsNullOrWhiteSpace($window.title)) { $parts.Add($window.title) }
+        $parts.Add("[$workspaceLabel]")
+        if (-not $workspace.isDisplayed) { $parts.Add('') }
+        # if ($window.hasFocus) { $parts.Add('Focused') }
+        if ($window.state.type -eq 'minimized') { $parts.Add('󱘁') }
 
-        if (-not $workspace.isDisplayed)
-        {
-            $parts += 'Hidden Workspace'
-        }
-
-        if ($window.hasFocus)
-        {
-            $parts += 'Focused'
-        }
-
-        if ($window.state.type -eq 'minimized')
-        {
-            $parts += 'Minimized'
-        }
-
-        [PSCustomObject]@{
+        $items.Add([PSCustomObject]@{
             ItemId          = ''
             Label           = ($parts -join ' | ')
             WindowId        = $window.id
@@ -539,51 +235,68 @@ function Get-TabItems
             Managed         = $true
             WindowHandle    = $null
             IsHidden        = $false
-        }
+        })
     }
 
-    $items = @($items | Sort-Object ProcessName, Title, WorkspaceName)
-    for ($index = 0; $index -lt $items.Count; $index++)
-    {
-        $itemId = '{0:D4}' -f ($index + 1)
-        $items[$index].ItemId = $itemId
-        $items[$index].Label = "$($items[$index].Label) | [${itemId}]"
+    # Sort managed items
+    $sortedItems = @($items | Sort-Object ProcessName, Title, WorkspaceName)
+    $index = 1
+    foreach ($item in $sortedItems) {
+        $itemId = '{0:D4}' -f $index
+        $item.ItemId = $itemId
+        $item.Label = "$($item.Label) | [$itemId]"
+        $index++
     }
 
-    # Add unmanaged windows (including hidden ones)
-    $unmanaged = Get-UnmanagedWindows -GlazeWindows $state.Windows -GlazeWorkspaces $state.Workspaces
-    $items += $unmanaged
+    # Unmanaged windows
+    $allWindows = [WinEnum]::GetAllWindowsStatic()
+    $systemPatterns = [regex]::new('^(System tray overflow window\.|MediaPlayer SMTC window.*|Realtek Audio Console|WingetMessageOnlyWindow|RemoteApp|PopupHost|Task Switching|Default IME|MSCTFIME UI|CiceroUIWndFrame|GDI\+ Window|DesktopWindowXamlSource|Hidden Window|MessageWindow|DDE Server Window|BroadcastListenerWindow|SystemResourceNotifyWindow|MediaContextNotificationWindow|NvContainerWindowClass|DWM Notification|Program Manager|WISPTIS|Windows Input Experience|Input.*|MS_WebcheckMonitor|BluetoothNotificationAreaIconWindowClass|MiracastConnectionWindow|Quick Settings|Settings|Start|Search|New notification|Battery|Menu|Shell.*|Task Host|OmApSvcBroker|Windows.*Experience|NvSvc|UxdService|RealtekAudioBackgroundProcessClass|SecurityHealthSystray|QTrayIconMessageWindow|GlobalHiddenWindow|Windows Push Notifications|Discord Overlay Input Trap|_q_titlebar$|\.NET-BroadcastEventWindow|Progress|Firefox Media Keys|WinEventWindow|EXPLORER)', 'IgnoreCase')
+    $ignoredPatterns = [regex]::new('(Untitled|CrossDeviceResumeWindow|Windows Default Lock Screen|\.ahk - AutoHotkey|^yasb$|^YasbBar$|Buttery Taskbar)', 'IgnoreCase')
 
-    # Add item IDs for unmanaged windows
-    $managedCount = ($items | Where-Object { $_.Managed }).Count
-    $unmanagedItems = $items | Where-Object { -not $_.Managed }
-    for ($index = 0; $index -lt $unmanagedItems.Count; $index++)
-    {
-        $itemId = '{0:D4}' -f ($managedCount + $index + 1)
-        $unmanagedItems[$index].ItemId = $itemId
-        $unmanagedItems[$index].Label = "$($unmanagedItems[$index].Label) | [${itemId}]"
+    $finalItems = [System.Collections.Generic.List[object]]::new()
+    $finalItems.AddRange($sortedItems)
+
+    foreach ($window in $allWindows) {
+        if ($glazeTitles.Contains($window.Title)) { continue }
+        if ($systemPatterns.IsMatch($window.Title)) { continue }
+        if ($ignoredPatterns.IsMatch($window.Title)) { continue }
+
+        $statusParts = [System.Collections.Generic.List[string]]::new()
+        if ($window.IsMinimized) { $statusParts.Add('󰲏') }
+        if (-not $window.IsVisible) { $statusParts.Add('󰈉') }
+        $statusStr = if ($statusParts.Count -gt 0) { " [$($statusParts -join ' | ')]" } else { '' }
+
+        $itemId = '{0:D4}' -f $index
+        $finalItems.Add([PSCustomObject]@{
+            ItemId          = $itemId
+            Label           = "󰶐 $($window.Title)$statusStr | [$itemId]"
+            WindowHandle    = $window.Handle
+            Managed         = $false
+            IsHidden        = (-not $window.IsVisible) -or $window.IsMinimized
+            IsMinimized     = $window.IsMinimized
+            IsVisible       = $window.IsVisible
+            Title           = $window.Title
+            Workspaces      = $glazeWorkspaces
+        })
+        $index++
     }
 
-    return $items
+    return $finalItems
 }
 
 function Hide-SelectedWindow
 {
     param(
         [Parameter(Mandatory)]$WindowTitle,
-        [Parameter(Mandatory)]$AllItems,
-        [Parameter(Mandatory)]$State
+        [Parameter(Mandatory)]$AllItems
     )
 
     # Safety check: don't hide ourselves
     $selfTitles = @('Wlines Glaze Tab', 'Wlines Start Menu')
-    foreach ($selfTitle in $selfTitles)
+    if ($selfTitles -contains $WindowTitle)
     {
-        if ($WindowTitle -eq $selfTitle)
-        {
-            Write-Warning "Cannot hide: This is the current script window."
-            return $false
-        }
+        Write-Warning "Cannot hide: This is the current script window."
+        return $false
     }
 
     # Find the window by title
@@ -604,12 +317,11 @@ function Hide-SelectedWindow
             glazewm command focus --container-id $window.WindowId | Out-Null
             Start-Sleep -Milliseconds 300
             glazewm command close | Out-Null
-            Start-Sleep -Milliseconds 500
         } else
         {
             # Hide unmanaged window using WinAPI
             Write-Host "Hiding unmanaged window: $($window.Title)"
-            [FocusHelper]::ShowWindow($window.WindowHandle, [FocusHelper]::SW_HIDE) | Out-Null
+            [WinEnum]::ShowWindow($window.WindowHandle, [WinEnum]::SW_HIDE) | Out-Null
         }
 
         Write-Host "Window hidden successfully." -ForegroundColor Green
@@ -649,20 +361,20 @@ function Show-HiddenWindow
         }
 
         # Show the window
-        [FocusHelper]::ShowWindow($WindowHandle, [FocusHelper]::SW_RESTORE) | Out-Null
+        [WinEnum]::ShowWindow($WindowHandle, [WinEnum]::SW_RESTORE) | Out-Null
         
         # Small delay to allow window to restore
         Start-Sleep -Milliseconds 100
         
         # Set it to foreground
-        [FocusHelper]::SetForegroundWindow($WindowHandle) | Out-Null
+        [WinEnum]::SetForegroundWindow($WindowHandle) | Out-Null
     } catch
     {
         Write-Warning "Failed to show window: $($_.Exception.Message)"
     }
 }
 
-$items = @(Get-TabItems)
+$items = Get-TabItems
 
 # SSH warning
 if ($IsRemoteSession)
@@ -703,8 +415,7 @@ if ($List)
 # Handle -Hide parameter
 if (-not [string]::IsNullOrWhiteSpace($Hide))
 {
-    $state = Get-GlazeState
-    Hide-SelectedWindow -WindowTitle $Hide -AllItems $items -State $state
+    Hide-SelectedWindow -WindowTitle $Hide -AllItems $items
     return
 }
 
@@ -755,7 +466,7 @@ try
             Write-Warning "Cannot hide: This is a protected window."
             return
         }
-        Hide-SelectedWindow -WindowTitle $selectedItem.Title -AllItems $items -State (Get-GlazeState)
+        Hide-SelectedWindow -WindowTitle $selectedItem.Title -AllItems $items
     } else
     {
         # Focus action (default)
@@ -789,7 +500,7 @@ try
                         glazewm command focus --workspace $displayedWorkspace.name | Out-Null
                     }
                 }
-                [Win32]::SetForegroundWindow($selectedItem.WindowHandle) | Out-Null
+                [WinEnum]::SetForegroundWindow($selectedItem.WindowHandle) | Out-Null
             }
         }
     }

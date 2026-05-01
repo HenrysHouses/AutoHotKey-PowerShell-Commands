@@ -37,7 +37,7 @@ $textforegroundBlurred = "#f2f2f8"
 $textbackgroundBlurred = "#9beb2e00"
 $borderColorBlurred = "#9beb2e"
 
-$font = "JetBrainsMono NF"
+$font = "JetBrainsMono NFM Regular"
 $fontsize = 21
 $padding = 4
 $inputWidth = 200

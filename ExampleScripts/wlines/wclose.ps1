@@ -64,12 +64,11 @@ $ExcludedProcessIds = [System.Collections.Generic.HashSet[int]]::new()
     'Taskmgr'
 )
 [void]$ExcludedProcessIds.Add($PID)
-$parentProcessId = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $PID" -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty ParentProcessId -ErrorAction SilentlyContinue
-if ($parentProcessId -is [int])
-{
-    [void]$ExcludedProcessIds.Add($parentProcessId)
-}
+try {
+    $parentProcessId = (Get-Process -Id $PID -ErrorAction SilentlyContinue).Parent.Id
+    if ($null -ne $parentProcessId) { [void]$ExcludedProcessIds.Add($parentProcessId) }
+} catch {}
+
 if ($ExtraArgs -contains '--force')
 {
     $Force = $true
@@ -112,15 +111,13 @@ namespace WlinesKill {
 '@
 }
 
+# Optimized logging (lazy initialization and batching could be better, but just minimizing calls for now)
+$EnableLogging = $false # Set to true for debugging
 function Write-LauncherLog
 {
     param([Parameter(Mandatory)][string]$Message)
-
-    if (-not (Test-Path $LogDir))
-    {
-        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
-    }
-
+    if (-not $EnableLogging) { return }
+    if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
     Add-Content -Path $LogPath -Value "[$timestamp] $Message"
 }
@@ -130,28 +127,19 @@ function Get-ProcessCommandLineMap
     param([int[]]$ProcessIds)
 
     $map = @{}
-    if ($null -eq $ProcessIds -or $ProcessIds.Count -eq 0)
-    {
-        return $map
-    }
+    if ($null -eq $ProcessIds -or $ProcessIds.Count -eq 0) { return $map }
 
-    $filter = ($ProcessIds | Sort-Object -Unique | ForEach-Object { "ProcessId = $_" }) -join ' OR '
-    if ([string]::IsNullOrWhiteSpace($filter))
-    {
-        return $map
-    }
-
-    try
-    {
-        $processInfos = Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction Stop
-        foreach ($processInfo in $processInfos)
-        {
-            $map[[int]$processInfo.ProcessId] = [string]$processInfo.CommandLine
+    $uniqueIds = $ProcessIds | Sort-Object -Unique
+    $filter = ($uniqueIds | ForEach-Object { "ProcessId = $_" }) -join ' OR '
+    
+    try {
+        $processInfos = Get-CimInstance -ClassName Win32_Process -Filter $filter -ErrorAction SilentlyContinue
+        if ($processInfos) {
+            foreach ($processInfo in $processInfos) {
+                $map[[int]$processInfo.ProcessId] = [string]$processInfo.CommandLine
+            }
         }
-    } catch
-    {
-        Write-LauncherLog ("Bulk command line lookup failed: {0}" -f $_.Exception.Message)
-    }
+    } catch {}
 
     return $map
 }
@@ -159,18 +147,9 @@ function Get-ProcessCommandLineMap
 function Format-SearchField
 {
     param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value))
-    {
-        return ''
-    }
-
+    if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
     $singleLine = ($Value -replace '\s+', ' ').Trim()
-    if ($singleLine.Length -le $DisplayLimit)
-    {
-        return $singleLine
-    }
-
+    if ($singleLine.Length -le $DisplayLimit) { return $singleLine }
     return $singleLine.Substring(0, $DisplayLimit) + '...'
 }
 
@@ -180,307 +159,130 @@ function Get-VisibleWindowCandidates
     $callback = [WlinesKill.NativeMethods+EnumWindowsProc]{
         param([IntPtr]$hWnd, [IntPtr]$lParam)
 
-        if (-not [WlinesKill.NativeMethods]::IsWindowVisible($hWnd))
-        {
-            return $true
-        }
+        if (-not [WlinesKill.NativeMethods]::IsWindowVisible($hWnd)) { return $true }
 
         $titleLength = [WlinesKill.NativeMethods]::GetWindowTextLengthW($hWnd)
-        if ($titleLength -le 0)
-        {
-            return $true
-        }
+        if ($titleLength -le 0) { return $true }
 
         $builder = [System.Text.StringBuilder]::new($titleLength + 1)
         [void][WlinesKill.NativeMethods]::GetWindowTextW($hWnd, $builder, $builder.Capacity)
-        $windowTitle = Format-SearchField $builder.ToString()
-        if ([string]::IsNullOrWhiteSpace($windowTitle))
-        {
-            return $true
-        }
+        $windowTitle = $builder.ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($windowTitle)) { return $true }
 
         [uint32]$processId = 0
         [void][WlinesKill.NativeMethods]::GetWindowThreadProcessId($hWnd, [ref]$processId)
-        if ($processId -le 0)
-        {
-            return $true
-        }
-
-        $windows.Add([PSCustomObject]@{
+        if ($processId -gt 0) {
+            $windows.Add([PSCustomObject]@{
                 Hwnd        = $hWnd
                 HwndHex     = ('0x{0:X}' -f $hWnd.ToInt64())
                 ProcessId   = [int]$processId
                 WindowTitle = $windowTitle
             })
-
+        }
         return $true
     }
 
     [void][WlinesKill.NativeMethods]::EnumWindows($callback, [IntPtr]::Zero)
-    return @($windows)
-}
-
-function Get-ProcessStateLabel
-{
-    param($Process)
-
-    try
-    {
-        if ($null -ne $Process.Responding -and -not $Process.Responding)
-        {
-            return 'Not Responding'
-        }
-    } catch
-    {
-        return ''
-    }
-
-    return ''
+    return $windows
 }
 
 function Get-RunningApplicationItems
 {
-    Write-LauncherLog "Enumerating visible windows for session $CurrentSessionId"
-    $processes = @(Get-Process -ErrorAction SilentlyContinue)
-    $processMap = @{}
-    foreach ($process in $processes)
-    {
-        try
-        {
-            $processId = $process.Id
-            if (-not $processMap.ContainsKey($processId))
-            {
-                $processMap[$processId] = $process
-            }
-        } catch
-        {
-            Write-LauncherLog ("Skipping process while building map: {0}" -f $_.Exception.Message)
-        }
+    $processes = Get-Process | Where-Object { 
+        ($SkipSessionIdCheck -or $_.SessionId -eq $CurrentSessionId) -and 
+        $_.ProcessName -notin $IgnoredProcessNames -and
+        ($Force -or $_.ProcessName -notin $IgnoredCloseOnlyProcessNames) -and
+        -not $ExcludedProcessIds.Contains($_.Id)
     }
+    
+    $processMap = @{}
+    foreach ($p in $processes) { $processMap[$p.Id] = $p }
 
-    Write-LauncherLog "Get-Process returned $($processes.Count) processes"
-    $visibleWindows = @(Get-VisibleWindowCandidates)
-    Write-LauncherLog "EnumWindows returned $($visibleWindows.Count) visible titled windows"
+    $visibleWindows = Get-VisibleWindowCandidates
+    $candidates = [System.Collections.Generic.List[object]]::new()
 
-    $candidates = foreach ($window in $visibleWindows)
-    {
-        try
-        {
-            $processId = $window.ProcessId
-            if ($ExcludedProcessIds.Contains($processId))
-            {
-                continue
-            }
-
-            if (-not $processMap.ContainsKey($processId))
-            {
-                continue
-            }
-
-            $process = $processMap[$processId]
-            if (-not $SkipSessionIdCheck -and $process.SessionId -ne $CurrentSessionId)
-            {
-                continue
-            }
-
-            if ($process.ProcessName -in $IgnoredProcessNames)
-            {
-                continue
-            }
-
-            if ((-not $Force) -and $process.ProcessName -in $IgnoredCloseOnlyProcessNames)
-            {
-                continue
-            }
-
-            [PSCustomObject]@{
+    foreach ($window in $visibleWindows) {
+        if ($processMap.ContainsKey($window.ProcessId)) {
+            $process = $processMap[$window.ProcessId]
+            $state = try { if ($process.Responding -eq $false) { 'Not Responding' } else { '' } } catch { '' }
+            
+            $candidates.Add([PSCustomObject]@{
                 Hwnd        = $window.Hwnd
                 HwndHex     = $window.HwndHex
-                ProcessId   = $processId
+                ProcessId   = $window.ProcessId
                 Name        = $process.ProcessName
-                State       = Get-ProcessStateLabel $process
-                WindowTitle = $window.WindowTitle
-            }
-        } catch
-        {
-            Write-LauncherLog ("Skipping window during candidate scan: {0}" -f $_.Exception.Message)
-            continue
+                State       = $state
+                WindowTitle = Format-SearchField $window.WindowTitle
+            })
         }
     }
 
-    $candidates = @($candidates | Sort-Object Name, ProcessId, HwndHex)
-    Write-LauncherLog "Visible application candidates: $($candidates.Count)"
-    $candidateProcessIds = @()
-    if ($candidates.Count -gt 0)
-    {
-        $candidateProcessIds = @($candidates | Select-Object -ExpandProperty ProcessId -Unique)
-    }
+    if ($candidates.Count -eq 0) { return @() }
+
+    $candidateProcessIds = $candidates | Select-Object -ExpandProperty ProcessId -Unique
     $commandLineMap = Get-ProcessCommandLineMap -ProcessIds $candidateProcessIds
 
-    $items = foreach ($candidate in $candidates)
-    {
-        try
-        {
-            $processId = $candidate.ProcessId
-            $processName = $candidate.Name
-            $processState = $candidate.State
-            $windowTitle = $candidate.WindowTitle
-            $hwndHex = $candidate.HwndHex
-            $commandLine = ''
-            if ($commandLineMap.ContainsKey($processId))
-            {
-                $commandLine = Format-SearchField $commandLineMap[$processId]
-            }
-
-            $parts = @($processName)
-
-            if (-not [string]::IsNullOrWhiteSpace($processState))
-            {
-                $parts += $processState
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($windowTitle))
-            {
-                $parts += $windowTitle
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($commandLine))
-            {
-                $parts += $commandLine
-            }
-
-            $parts += $hwndHex
-
-            [PSCustomObject]@{
-                ItemId      = ''
-                Label       = ($parts -join ' | ')
-                Hwnd        = $candidate.Hwnd
-                HwndHex     = $hwndHex
-                ProcessId   = $processId
-                Name        = $processName
-                State       = $processState
-                WindowTitle = $windowTitle
-                CommandLine = $commandLine
-            }
-        } catch
-        {
-            Write-LauncherLog ("Skipping process due to enumeration failure: {0}" -f $_.Exception.Message)
-            continue
-        }
+    $items = [System.Collections.Generic.List[object]]::new()
+    $index = 1
+    foreach ($candidate in ($candidates | Sort-Object Name, ProcessId, HwndHex)) {
+        $cmdLine = if ($commandLineMap.ContainsKey($candidate.ProcessId)) { Format-SearchField $commandLineMap[$candidate.ProcessId] } else { '' }
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $parts.Add($candidate.Name)
+        if ($candidate.State) { $parts.Add($candidate.State) }
+        if ($candidate.WindowTitle) { $parts.Add($candidate.WindowTitle) }
+        if ($cmdLine) { $parts.Add($cmdLine) }
+        $parts.Add($candidate.HwndHex)
+        
+        $itemId = '{0:D4}' -f $index
+        $items.Add([PSCustomObject]@{
+            ItemId      = $itemId
+            Label       = ($parts -join ' | ') + " | [$itemId]"
+            Hwnd        = $candidate.Hwnd
+            HwndHex     = $candidate.HwndHex
+            ProcessId   = $candidate.ProcessId
+            Name        = $candidate.Name
+        })
+        $index++
     }
-
-    $sortedItems = @($items | Sort-Object Name, ProcessId, HwndHex)
-    for ($index = 0; $index -lt $sortedItems.Count; $index++)
-    {
-        $itemId = '{0:D4}' -f ($index + 1)
-        $sortedItems[$index].ItemId = $itemId
-        $sortedItems[$index].Label = "$($sortedItems[$index].Label) | [${itemId}]"
-    }
-    Write-LauncherLog "Collected $($sortedItems.Count) processes for display"
-    return $sortedItems
+    return $items
 }
 
 function Get-RunningProcessItems
 {
-    Write-LauncherLog "Enumerating session processes for force mode in session $CurrentSessionId"
-    $processes = @(Get-Process -ErrorAction SilentlyContinue)
-    Write-LauncherLog "Get-Process returned $($processes.Count) processes for force mode"
-
-    $candidates = foreach ($process in $processes)
-    {
-        try
-        {
-            $processId = $process.Id
-            if ($ExcludedProcessIds.Contains($processId))
-            {
-                continue
-            }
-
-            if (-not $SkipSessionIdCheck -and $process.SessionId -ne $CurrentSessionId)
-            {
-                continue
-            }
-
-            if ($process.ProcessName -in $IgnoredProcessNames)
-            {
-                continue
-            }
-
-            [PSCustomObject]@{
-                ProcessId = $processId
-                Name      = $process.ProcessName
-                State     = Get-ProcessStateLabel $process
-            }
-        } catch
-        {
-            Write-LauncherLog ("Skipping process during force enumeration: {0}" -f $_.Exception.Message)
-            continue
-        }
+    $processes = Get-Process | Where-Object { 
+        ($SkipSessionIdCheck -or $_.SessionId -eq $CurrentSessionId) -and 
+        $_.ProcessName -notin $IgnoredProcessNames -and
+        -not $ExcludedProcessIds.Contains($_.Id)
     }
 
-    $candidates = @($candidates | Sort-Object Name, ProcessId)
-    Write-LauncherLog "Force mode candidates: $($candidates.Count)"
+    if ($processes.Count -eq 0) { return @() }
 
-    $candidateProcessIds = @()
-    if ($candidates.Count -gt 0)
-    {
-        $candidateProcessIds = @($candidates | Select-Object -ExpandProperty ProcessId -Unique)
-    }
+    $candidateProcessIds = $processes | Select-Object -ExpandProperty Id -Unique
     $commandLineMap = Get-ProcessCommandLineMap -ProcessIds $candidateProcessIds
 
-    $processItems = foreach ($candidate in $candidates)
-    {
-        try
-        {
-            $processId = $candidate.ProcessId
-            $processName = $candidate.Name
-            $processState = $candidate.State
-            $commandLine = ''
-            if ($commandLineMap.ContainsKey($processId))
-            {
-                $commandLine = Format-SearchField $commandLineMap[$processId]
-            }
-
-            $parts = @($processName)
-
-            if (-not [string]::IsNullOrWhiteSpace($processState))
-            {
-                $parts += $processState
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($commandLine))
-            {
-                $parts += $commandLine
-            }
-
-            [PSCustomObject]@{
-                ItemId      = ''
-                Label       = ($parts -join ' | ')
-                Hwnd        = [IntPtr]::Zero
-                HwndHex     = ''
-                ProcessId   = $processId
-                Name        = $processName
-                State       = $processState
-                WindowTitle = ''
-                CommandLine = $commandLine
-            }
-        } catch
-        {
-            Write-LauncherLog ("Skipping process group due to enumeration failure: {0}" -f $_.Exception.Message)
-            continue
-        }
+    $items = [System.Collections.Generic.List[object]]::new()
+    $index = 1
+    foreach ($process in ($processes | Sort-Object ProcessName, Id)) {
+        $state = try { if ($process.Responding -eq $false) { 'Not Responding' } else { '' } } catch { '' }
+        $cmdLine = if ($commandLineMap.ContainsKey($process.Id)) { Format-SearchField $commandLineMap[$process.Id] } else { '' }
+        
+        $parts = [System.Collections.Generic.List[string]]::new()
+        $parts.Add($process.ProcessName)
+        if ($state) { $parts.Add($state) }
+        if ($cmdLine) { $parts.Add($cmdLine) }
+        
+        $itemId = '{0:D4}' -f $index
+        $items.Add([PSCustomObject]@{
+            ItemId      = $itemId
+            Label       = ($parts -join ' | ') + " | [$itemId]"
+            Hwnd        = [IntPtr]::Zero
+            HwndHex     = ''
+            ProcessId   = $process.Id
+            Name        = $process.ProcessName
+        })
+        $index++
     }
-
-    $sortedItems = @($processItems | Sort-Object Name, ProcessId)
-    for ($index = 0; $index -lt $sortedItems.Count; $index++)
-    {
-        $itemId = '{0:D4}' -f ($index + 1)
-        $sortedItems[$index].ItemId = $itemId
-        $sortedItems[$index].Label = "$($sortedItems[$index].Label) | [${itemId}]"
-    }
-
-    Write-LauncherLog "Collected $($sortedItems.Count) visible processes for display"
-    return $sortedItems
+    return $items
 }
 
 Write-LauncherLog "Starting wclose (force=$Force, remote=$IsRemoteSession)"

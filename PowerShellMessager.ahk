@@ -57,6 +57,11 @@ OnExit(KillConnection)
 	PipeWrite(content, pipeName)
 }
 
+^!+m:: {
+	content := "__FROM__:AutoHotKeys`nwmusic"
+	PipeWrite(content, pipeName)
+}
+
 ^!b:: {
 	content := "__FROM__:AutoHotKeys`nwbookmarks"
 	PipeWrite(content, pipeName)
