@@ -1,18 +1,18 @@
 [CmdletBinding()]
 param(
     [switch]$List,
-    [switch]$fzf
+    [switch]$gui
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$WlinesWrapper = if ($fzf)
-{
-    Join-Path $PSScriptRoot 'wfzf.ps1'
-} else
+$WlinesWrapper = if ($gui)
 {
     Join-Path $PSScriptRoot 'wrofi.ps1'
+} else
+{
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 }
 
 # Auto-detect SSH session

@@ -28,44 +28,6 @@ function Test-WSLConnection
     }
 }
 
-# Function to mount CachyOS drive if needed
-function Mount-CachyOSDrive
-{
-    try
-    {
-        $mountCheck = wsl -u $WSLUser -- test -d /mnt/CachyOs 2>&1
-        if ($LASTEXITCODE -ne 0)
-        {
-            wsl -e sudo mount /dev/sdb1 /mnt/CachyOs 2>&1 | Out-Null
-            return $LASTEXITCODE -eq 0
-        }
-        return $true
-    } catch
-    {
-        return $false
-    }
-}
-
-# Function to ensure MPD is running
-function Start-MPDIfNeeded
-{
-    try
-    {
-        $mpdCheck = wsl -u $WSLUser -- systemctl --user is-active mpd 2>&1
-        if ($mpdCheck -notmatch "active")
-        {
-            wsl -u $WSLUser -- systemctl --user start mpd 2>&1 | Out-Null
-            Start-Sleep -Milliseconds 500
-            $mpdCheck = wsl -u $WSLUser -- systemctl --user is-active mpd 2>&1
-            return $mpdCheck -match "active"
-        }
-        return $true
-    } catch
-    {
-        return $false
-    }
-}
-
 # Function to launch ffplay with stream URL via keeper watchdog
 function Start-ffplayStream
 {
@@ -94,16 +56,20 @@ if ($isPlay)
 } elseif ($isToggle)
 {
     # Check current MPD state to decide whether to start or stop stream
-    try {
+    try
+    {
         $mpdStatus = wsl -u $WSLUser -e rmpc status 2>&1
-        if ($mpdStatus -match "playing") {
+        if ($mpdStatus -match "playing")
+        {
             # About to pause
             Stop-ffplayStream | Out-Null
-        } else {
+        } else
+        {
             # About to play
             Start-ffplayStream | Out-Null
         }
-    } catch {
+    } catch
+    {
         # Fallback to restart if status check fails
         Start-ffplayStream | Out-Null
     }

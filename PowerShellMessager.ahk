@@ -48,12 +48,12 @@ OnExit(KillConnection)
 }
 
 ^!p:: {
-	content := "__FROM__:AutoHotKeys`nwvimpro"
+	content := "__FROM__:AutoHotKeys`nwvimpro -gui"
 	PipeWrite(content, pipeName)
 }
 
 ^!m:: {
-	content := "__FROM__:AutoHotKeys`nwrmpc"
+	content := "__FROM__:AutoHotKeys`nwrmpc -gui"
 	PipeWrite(content, pipeName)
 }
 

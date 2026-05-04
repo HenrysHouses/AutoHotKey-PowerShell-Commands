@@ -8,5 +8,4 @@ if ($null -ne $alive)
     exit 1
 }
 
-# Start-Process pwsh -WindowStyle hidden -ArgumentList "-NoProfile", "-Command", "sudo wsl.exe --mount $drivePath"
-wsl.exe --mount $drivePath
+Start-Process -FilePath "sudo" -ArgumentList "-s", "wsl.exe", "--mount", $drivePath -WindowStyle Hidden

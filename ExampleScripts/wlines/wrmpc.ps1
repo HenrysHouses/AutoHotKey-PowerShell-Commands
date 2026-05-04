@@ -1,10 +1,8 @@
 # wrmpc.ps1 - RMPC/Music Player Control via wlines/fzf with SSH support
-# Translates rofi-rmpccontrol.sh to PowerShell with wlines wrapper and SSH capability
-# SSH mode: Android -> Windows SSH -> pwsh-msg -> WSL -> rmpc
 
 param(
     [Parameter(Mandatory = $false)]
-    [switch]$fzf,
+    [switch]$gui,
     
     [Parameter(Mandatory = $false)]
     [switch]$Help
@@ -13,12 +11,11 @@ param(
 function Show-Help
 {
     @"
-wrmpc.ps1 - Advanced RMPC Music Player Controller
+wrmpc.ps1 - RMPC Music Player Controller
 
 PARAMETERS:
-    -fzf                       Use fzf for interactive selection instead of rofi
+    -gui                       Use wlines gui for interactive selection instead of fzf
                                Auto-detects if fzf is available in WSL
-                               Falls back to rofi if not available
     
     -Help                      Display this help message
 
@@ -33,14 +30,13 @@ SSH DETECTION:
     - Allows remote control from SSH client (e.g., Android)
 
 USAGE EXAMPLES:
-    # Basic usage with rofi (default)
-    .\wrmpc.ps1
+    # use wlines gui
+    .\wrmpc.ps1 -gui
     
     # Use fzf for selection
     .\wrmpc.ps1 -fzf
     
     # SSH auto-detection works automatically
-    # From Android SSH: same commands, SSH routing handled transparently
     
     # Show help
     .\wrmpc.ps1 -Help
@@ -50,12 +46,9 @@ FEATURES:
     - Add/Play Next/Play Now (local and YouTube)
     - YouTube Link and Search support
     - Volume control
-    - Album art extraction
     - History tracking for YouTube links
     - Automatic SSH detection and routing
-    - Works via SSH from remote clients (Android, etc.)
-    - Flexible UI: rofi or fzf based on availability
-    - Wrappers handle all UI interactions
+    - UI: wlines or fzf based on availability
 
 ACTIONS:
     Play/Pause      - Toggle playback
@@ -116,12 +109,38 @@ if (-not [string]::IsNullOrWhiteSpace($env:SSH_CONNECTION))
 }
 
 # Check if fzf is available in WSL
-$script:UseFzf = $fzf
+$script:UseFzf = if ($gui)
+{$false
+} else
+{$true
+}
 
 # Logging
 function Write-Log
 {
     param([string]$Message, [string]$Level = "INFO")
+}
+
+# Send Windows Toast Notification using BurntToast
+function Send-Notification
+{
+    param(
+        [string]$Title,
+        [string]$Message
+    )
+    
+    try
+    {
+        if ($Title)
+        {
+            $Title = "RMPC: $Title"     
+        }
+
+        New-BurntToastNotification -Text "$Title", "$Message" -Silent
+    } catch
+    {
+        # Silently fail if BurntToast is not available
+    }
 }
 
 # Format rmpc command with config file
@@ -144,15 +163,19 @@ function Invoke-RmpcCommand
         [string]$CommandName = ""
     )
     
-    $displayCmd = if ($CommandName) { "$CommandName" } else { $Command }
+    $displayCmd = if ($CommandName)
+    { "$CommandName" 
+    } else
+    { $Command 
+    }
     $formattedCmd = Format-RmpcCommand $Command
     
     if ($script:IsSSH)
     {
-        & pwsh-msg -Command "wsl-rmpc-exec -Command `"$formattedCmd`"" -Name "Rmpc Control"
+        pwsh-msg -Command "wsl-rmpc-exec -Command `"$formattedCmd`"" -Name "Rmpc Control"
     } else
     {
-        & wsl-rmpc-exec -Command $formattedCmd
+        wsl-rmpc-exec -Command $formattedCmd
     }
 }
 
@@ -247,14 +270,18 @@ function Get-LocalSongSelection
     
     $songList = & wsl-rmpc-exec.ps1 -Command $findCmd
     
-    if ([string]::IsNullOrEmpty($songList)) { return $null }
+    if ([string]::IsNullOrEmpty($songList))
+    { return $null 
+    }
     
     $songLines = @($songList -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $formattedList = $songLines -join "`n"
     
     $selection = Get-Selection $formattedList "Select a Track"
     
-    if ([string]::IsNullOrEmpty($selection)) { return $null }
+    if ([string]::IsNullOrEmpty($selection))
+    { return $null 
+    }
     
     $parts = $selection -split ' ::ARTIST:: '
     $songName = $parts[0]
@@ -275,20 +302,30 @@ function Save-YouTubeToHistory
 {
     param([string]$Link)
     
-    if ([string]::IsNullOrEmpty($Link)) { return }
+    if ([string]::IsNullOrEmpty($Link))
+    { return 
+    }
     
     $OriginalLink = $Link
-    if ($Link -match "::URL::\s*(https://[^\s]+)") { $Link = $matches[1] }
-    
-    if ($Link -notmatch "^https://www\.youtube\.com/watch\?v=") { return }
-    
-    if ($OriginalLink -match "^\[H\].*::URL::") { $entry = $OriginalLink }
-    else {
-        if ($Link -match "v=([a-zA-Z0-9_-]{11})") {
-            $videoId = $matches[1]
-            $entry = "[H]  $videoId ::URL:: $Link"
-        } else { return }
+    if ($Link -match "::URL::\s*(https://[^\s]+)")
+    { $Link = $matches[1] 
     }
+    
+    if ($Link -notmatch "^https://www\.youtube\.com/watch\?v=")
+    { return 
+    }
+    
+    # Get title from yt-dlp
+    $getTitleCmd = "yt-dlp --no-warnings --print title `"$Link`" 2>/dev/null || echo 'Unknown Title'"
+    $videoTitle = & wsl-rmpc-exec -Command $getTitleCmd
+    $videoTitle = if ($videoTitle)
+    { $videoTitle.Trim() 
+    } else
+    { "Unknown Title" 
+    }
+    
+    # Save to history with title
+    $entry = "[H]  $videoTitle ::URL:: $Link"
     
     $historyFile = "/mnt/CachyOs/@home/roockert/.cache/rmpc/rmpc_youtube_history"
     $saveCmd = "echo `"$entry`" >> `"$historyFile`""
@@ -309,7 +346,9 @@ function Get-YouTubeLink
         foreach ($line in ($history -split "`n"))
         {
             $line = $line.Trim()
-            if ($line -match "^\[H\].*::URL::\s*(https://[^\s]+)") { $historyList.Add($line) }
+            if ($line -match "^\[H\].*::URL::\s*(https://[^\s]+)")
+            { $historyList.Add($line) 
+            }
         }
         
         $historyList.Add("New Link")
@@ -317,7 +356,9 @@ function Get-YouTubeLink
         if ($historyList.Count -gt 1)
         {
             $link = Get-Selection ($historyList -join "`n") "YT Link or ID"
-            if ($link -eq "New Link") { return "" }
+            if ($link -eq "New Link")
+            { return "" 
+            }
             return $link
         }
     }
@@ -327,16 +368,24 @@ function Get-YouTubeLink
 function Test-YouTubeLink
 {
     param([string]$Link)
-    if ($Link -match "::URL::\s*(https://[^\s]+)") { $Link = $matches[1] }
+    if ($Link -match "::URL::\s*(https://[^\s]+)")
+    { $Link = $matches[1] 
+    }
     return ($Link -match "^https://www\.youtube\.com/watch\?v=" -or $Link -match "^[a-zA-Z0-9_-]{11}$")
 }
 
 function Format-YouTubeLink
 {
     param([string]$Link)
-    if ($Link -match "::URL::\s*(https://[^\s]+)") { $Link = $matches[1] }
-    if ($Link -match "^https://www\.youtube\.com/watch\?v=") { return $Link }
-    if ($Link -match "^[a-zA-Z0-9_-]{11}$") { return "https://www.youtube.com/watch?v=$Link" }
+    if ($Link -match "::URL::\s*(https://[^\s]+)")
+    { $Link = $matches[1] 
+    }
+    if ($Link -match "^https://www\.youtube\.com/watch\?v=")
+    { return $Link 
+    }
+    if ($Link -match "^[a-zA-Z0-9_-]{11}$")
+    { return "https://www.youtube.com/watch?v=$Link" 
+    }
     return $null
 }
 
@@ -352,148 +401,359 @@ function Get-SearchQuery
     
     $history = & wsl-rmpc-exec -Command "test -f $script:YouTubeHistoryFile && cat $script:YouTubeHistoryFile || echo ''"
     
+    $historyList = [System.Collections.Generic.List[string]]::new()
     if (-not [string]::IsNullOrEmpty($history))
     {
-        $historyList = [System.Collections.Generic.List[string]]::new()
         foreach ($line in ($history -split "`n"))
         {
             $line = $line.Trim()
-            if ($line -match "^\[H\].*::URL::\s*(https://[^\s]+)") { $historyList.Add($line) }
-        }
-        
-        $historyList.Add("New Search")
-        
-        if ($historyList.Count -gt 1)
-        {
-            $selection = Get-Selection ($historyList -join "`n") "Search"
-            if ($selection -eq "New Search" -or [string]::IsNullOrEmpty($selection)) { return "" }
-            if ($selection -match "::URL::\s*(https://[^\s]+)") { return $matches[1] }
-            return $selection
+            if ($line -match "^\[H\].*::URL::\s*(https://[^\s]+)")
+            { 
+                $historyList.Add($line) 
+            }
         }
     }
-    return ""
+    
+    $selection = Get-Selection ($historyList -join "`n") "Search"
+    
+    if ([string]::IsNullOrEmpty($selection))
+    { 
+        return "" 
+    }
+    
+    # If selection is a history entry (contains URL), extract the URL
+    if ($selection -match "::URL::\s*(https://[^\s]+)")
+    { 
+        return $matches[1] 
+    }
+    
+    # Otherwise it's a new search query typed by user - return as is
+    return $selection
 }
 
-function Invoke-PlayPause { Invoke-RmpcCommand "rmpc togglepause" "play-pause" }
-function Invoke-Skip { Invoke-RmpcCommand "rmpc next" "skip" }
-function Invoke-Previous { Invoke-RmpcCommand "rmpc prev" "previous" }
+function Invoke-PlayPause
+{ Invoke-RmpcCommand "rmpc togglepause" "play-pause" 
+}
+function Invoke-Skip
+{ Invoke-RmpcCommand "rmpc next" "skip" 
+}
+function Invoke-Previous
+{ Invoke-RmpcCommand "rmpc prev" "previous" 
+}
 
-function Invoke-AddLocal {
+function Invoke-AddLocal
+{
     $song = Get-LocalSongSelection
-    if ($song) { Invoke-RmpcCommand "rmpc add `"$($song.Path)`"" "add-local" }
+    if ($song)
+    {
+        Invoke-RmpcCommand "rmpc add `"$($song.Path)`"" "add-local" 
+    }
 }
 
-function Invoke-PlayNextLocal {
+function Invoke-PlayNextLocal
+{
     $song = Get-LocalSongSelection
-    if ($song) { Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc add -p `$((current_que + 1)) `"$($song.Path)`"" "play-next-local" }
+    if ($song)
+    {
+        Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc add -p `$((current_que + 1)) `"$($song.Path)`"" "play-next-local" 
+    }
 }
 
-function Invoke-PlayNowLocal {
+function Invoke-PlayNowLocal
+{
     $song = Get-LocalSongSelection
-    if ($song) { Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc add -p `$((current_que + 1)) `"$($song.Path)`"; sleep 0.5; rmpc next" "play-now-local" }
+    if ($song)
+    { 
+        Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc add -p `$((current_que + 1)) `"$($song.Path)`"; sleep 0.5; rmpc next" "play-now-local" 
+    }
 }
 
-function Invoke-AddYouTubeLink {
+function Invoke-AddYouTubeLink
+{
     $link = Get-YouTubeLink "add"
-    if ($link) {
+    if ($link)
+    {
         $link = Format-YouTubeLink $link
-        if ($link) { Save-YouTubeToHistory $link; Invoke-RmpcCommand "rmpc addyt `"$link`"" "add-yt-link" }
+        if ($link)
+        { 
+            $getTitleCmd = "yt-dlp --no-warnings --print title `"$link`" 2>/dev/null || echo 'Unknown Title'"
+            $formattedTitleCmd = Format-RmpcCommand $getTitleCmd
+            $videoTitle = & wsl-rmpc-exec -Command $formattedTitleCmd
+            $videoTitle = if ($videoTitle)
+            { $videoTitle.Trim() 
+            } else
+            { "Unknown Title" 
+            }
+            Send-Notification -Message "Adding: $videoTitle"
+            Save-YouTubeToHistory $link
+            Invoke-RmpcCommand "rmpc addyt `"$link`"" "add-yt-link" 
+        }
     }
 }
 
-function Invoke-PlayNextYouTubeLink {
+function Invoke-PlayNextYouTubeLink
+{
     $link = Get-YouTubeLink "play-next"
-    if ($link) {
+    if ($link)
+    {
         $link = Format-YouTubeLink $link
-        if ($link) { Save-YouTubeToHistory $link; Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc addyt -p `$((current_que + 1)) `"$link`"" "play-next-yt-link" }
+        if ($link)
+        { 
+            $getTitleCmd = "yt-dlp --no-warnings --print title `"$link`" 2>/dev/null || echo 'Unknown Title'"
+            $formattedTitleCmd = Format-RmpcCommand $getTitleCmd
+            $videoTitle = & wsl-rmpc-exec -Command $formattedTitleCmd
+            $videoTitle = if ($videoTitle)
+            { $videoTitle.Trim() 
+            } else
+            { "Unknown Title" 
+            }
+            Send-Notification -Message "Playing next: $videoTitle"
+            Save-YouTubeToHistory $link
+            Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc addyt -p `$((current_que + 1)) `"$link`"" "play-next-yt-link" 
+        }
     }
 }
 
-function Invoke-PlayNowYouTubeLink {
+function Invoke-PlayNowYouTubeLink
+{
     $link = Get-YouTubeLink "play-now"
-    if ($link) {
+    if ($link)
+    {
         $link = Format-YouTubeLink $link
-        if ($link) { Save-YouTubeToHistory $link; Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc addyt -p `$((current_que + 1)) `"$link`"; sleep 0.5; rmpc next" "play-now-yt-link" }
+        if ($link)
+        { 
+            $getTitleCmd = "yt-dlp --no-warnings --print title `"$link`" 2>/dev/null || echo 'Unknown Title'"
+            $formattedTitleCmd = Format-RmpcCommand $getTitleCmd
+            $videoTitle = & wsl-rmpc-exec -Command $formattedTitleCmd
+            $videoTitle = if ($videoTitle)
+            { $videoTitle.Trim() 
+            } else
+            { "Unknown Title" 
+            }
+            Send-Notification -Message "Playing now: $videoTitle"
+            Save-YouTubeToHistory $link 
+            Invoke-RmpcCommand "current_que=`$(rmpc status | jq -r '.song'); rmpc addyt -p `$((current_que + 1)) `"$link`"; sleep 0.5; rmpc next" "play-now-yt-link" 
+        }
     }
 }
 
-function Invoke-AddSearch {
+function Invoke-AddSearch
+{
     $query = Get-SearchQuery "youtube"
-    if ($query) {
-        if ($query -match "^https://www\.youtube\.com/watch\?v=") { Save-YouTubeToHistory $query }
-        $searchCmd = "rmpc searchyt `"$query`" > /tmp/rmpc_search_output.txt 2>&1; sleep 1; url=`$(grep -oP `"Downloading '\K[^']+`" /tmp/rmpc_search_output.txt | head -1); if [ ! -z `"`$url`" ]; then video_id=`$(echo `"`$url`" | grep -oP 'v=\K[^&]+'); title=`$(rmpc queue | jq -r --arg id `"`$video_id`" '.[] | select(.file | contains(`$id`)) | .metadata.title' 2>/dev/null | head -1); if [ ! -z `"`$title`" ]; then echo `"[H]  `$title ::URL:: `$url`" >> '/mnt/CachyOs/@home/roockert/.cache/rmpc/rmpc_youtube_history'; fi; rm -f /tmp/rmpc_search_output.txt; fi"
-        Invoke-RmpcCommand $searchCmd "add-search"
+    if ($query)
+    {
+        if ($query -match "^https://www\.youtube\.com/watch\?v=")
+        { 
+            Save-YouTubeToHistory $query 
+        }
+        
+        $searchCmd = "rmpc searchyt `"$query`" 2>&1"
+        $formattedCmd = Format-RmpcCommand $searchCmd
+        $output = & wsl-rmpc-exec -Command $formattedCmd
+        
+        # Extract URL from output and save to history
+        if ($output -match "Downloading '(https://[^']+)'")
+        {
+            Save-YouTubeToHistory $matches[1]
+            Send-Notification -Title "YouTube Search" -Message "Added: $query"
+        } else
+        {
+            Send-Notification -Title "YouTube Search Failed" -Message "No results for: $query"
+        }
     }
 }
 
-function Invoke-PlayNextSearch {
+function Invoke-PlayNextSearch
+{
     $query = Get-SearchQuery "youtube"
-    if ($query) {
-        if ($query -match "^https://www\.youtube\.com/watch\?v=") { Save-YouTubeToHistory $query }
-        $searchCmd = "current_que=`$(rmpc status | jq -r '.song'); rmpc searchyt -p `$((current_que + 1)) `"$query`" > /tmp/rmpc_search_output.txt 2>&1; sleep 1; url=`$(grep -oP `"Downloading '\K[^']+`" /tmp/rmpc_search_output.txt | head -1); if [ ! -z `"`$url`" ]; then video_id=`$(echo `"`$url`" | grep -oP 'v=\K[^&]+'); title=`$(rmpc queue | jq -r --arg id `"`$video_id`" '.[] | select(.file | contains(`$id`)) | .metadata.title' 2>/dev/null | head -1); if [ ! -z `"`$title`" ]; then echo `"[H]  `$title ::URL:: `$url`" >> '/mnt/CachyOs/@home/roockert/.cache/rmpc/rmpc_youtube_history'; fi; rm -f /tmp/rmpc_search_output.txt; fi"
-        Invoke-RmpcCommand $searchCmd "play-next-search"
+    if ($query)
+    {
+        if ($query -match "^https://www\.youtube\.com/watch\?v=")
+        { 
+            Save-YouTubeToHistory $query 
+        }
+        
+        $searchCmd = "current_que=`$(rmpc status | jq -r '.song'); rmpc searchyt -p `$((current_que + 1)) `"$query`" 2>&1"
+        $formattedCmd = Format-RmpcCommand $searchCmd
+        $output = & wsl-rmpc-exec -Command $formattedCmd
+        
+        # Extract URL from output and save to history
+        if ($output -match "Downloading '(https://[^']+)'")
+        {
+            Save-YouTubeToHistory $matches[1]
+            Send-Notification -Title "YouTube Search" -Message "Queued: $query"
+        } else
+        {
+            Send-Notification -Title "YouTube Search Failed" -Message "No results for: $query"
+        }
     }
 }
 
-function Invoke-PlayNowSearch {
+function Invoke-PlayNowSearch
+{
     $query = Get-SearchQuery "youtube"
-    if ($query) {
-        if ($query -match "^https://www\.youtube\.com/watch\?v=") { Save-YouTubeToHistory $query }
-        $searchCmd = "current_que=`$(rmpc status | jq -r '.song'); rmpc searchyt -p `$((current_que + 1)) `"$query`" > /tmp/rmpc_search_output.txt 2>&1; sleep 2; url=`$(grep -oP `"Downloading '\K[^']+`" /tmp/rmpc_search_output.txt | head -1); if [ ! -z `"`$url`" ]; then video_id=`$(echo `"`$url`" | grep -oP 'v=\K[^&]+'); title=`$(rmpc queue | jq -r --arg id `"`$video_id`" '.[] | select(.file | contains(`$id`)) | .metadata.title' 2>/dev/null | head -1); if [ ! -z `"`$title`" ]; then echo `"[H]  `$title ::URL:: `$url`" >> '/mnt/CachyOs/@home/roockert/.cache/rmpc/rmpc_youtube_history'; fi; rm -f /tmp/rmpc_search_output.txt; fi; if [ `"`$current_que`" != `"-1`" ]; then rmpc next 2>/dev/null || true; fi; rmpc play 2>/dev/null || true"
-        Invoke-RmpcCommand $searchCmd "play-now-search"
+    if ($query)
+    {
+        if ($query -match "^https://www\.youtube\.com/watch\?v=")
+        { 
+            Save-YouTubeToHistory $query 
+        }
+        
+        $searchCmd = "current_que=`$(rmpc status | jq -r '.song'); rmpc searchyt -p `$((current_que + 1)) `"$query`" 2>&1; if [ `"`$current_que`" != `"-1`" ]; then sleep 0.5; rmpc next 2>/dev/null || true; fi; rmpc play 2>/dev/null || true"
+        $formattedCmd = Format-RmpcCommand $searchCmd
+        $output = & wsl-rmpc-exec -Command $formattedCmd
+        
+        # Extract URL from output and save to history
+        if ($output -match "Downloading '(https://[^']+)'")
+        {
+            Save-YouTubeToHistory $matches[1]
+            Send-Notification -Title "YouTube Search" -Message "Playing: $query"
+        } else
+        {
+            Send-Notification -Title "YouTube Search Failed" -Message "No results for: $query"
+        }
     }
 }
 
-function Invoke-ShowCurrent {
+function Invoke-ShowCurrent
+{
     $currentCmd = "songid=`$(rmpc status | jq -r '.songid'); name=`$(rmpc queue | jq -r --arg id `"`$songid`" '.[] | select(.id == (`$id | tonumber)) | .metadata.title'); echo `$name"
-    Invoke-RmpcCommand $currentCmd "current-song"
+    $output = & wsl-rmpc-exec -Command $currentCmd
+
+    if ($output -match "jq: error.*")
+    {
+        Send-Notification -Title "Now Playing" -Message "No song currently playing"
+    } else
+    {
+        if ($output)
+        {
+            Send-Notification -Title "Now Playing" -Message $output
+        } else
+        {
+            Send-Notification -Title "Now Playing" -Message "No song currently playing"
+        }
+    }
+    
 }
 
-function Invoke-VolumeControl {
+function Invoke-VolumeControl
+{
     $volume = Get-VolumeSelection
-    if ($volume) { Invoke-RmpcCommand "rmpc volume $volume" "volume-control" }
-}
-
-function Invoke-DownloadYouTube {
-    $link = Get-YouTubeLink "download"
-    if ($link) {
-        $link = Format-YouTubeLink $link
-        if ($link) { Invoke-RmpcCommand "cd ~/Music/youtube && yt-dlp `"$link`"" "download-yt" }
+    if ($volume)
+    { Invoke-RmpcCommand "rmpc volume $volume" "volume-control" 
     }
 }
 
-function Invoke-RestartMPD { Invoke-RmpcCommand "systemctl --user restart mpd && echo `"MPD restarted successfully`" || echo `"Failed to restart MPD`"" "restart-mpd" }
-function Invoke-RestartFfplay { pwsh-msg -Command "ffplay-keeper" -Restart -Name "Rmpc Control" -PipeName "PWSH_COMMAND_PIPE" }
+function Invoke-DownloadYouTube
+{
+    $link = Get-YouTubeLink "download"
+    if ($link)
+    {
+        $link = Format-YouTubeLink $link
+        if ($link)
+        {
+            # Get video title from yt-dlp metadata
+            $getTitleCmd = "yt-dlp --no-warnings --print title `"$link`" 2>/dev/null || echo 'Unknown Title'"
+            $formattedTitleCmd = Format-RmpcCommand $getTitleCmd
+            $videoTitle = & wsl-rmpc-exec -Command $formattedTitleCmd
+            $videoTitle = if ($videoTitle)
+            { $videoTitle.Trim() 
+            } else
+            { "Unknown Title" 
+            }
+            
+            Send-Notification -Title "Download Started" -Message "Downloading: $videoTitle"
+            
+            # Execute download command and capture output
+            $downloadCmd = "mkdir -p `"$script:MusicDir/youtube`" && cd `"$script:MusicDir/youtube`" && yt-dlp `"$link`" 2>&1"
+            $formattedDownloadCmd = Format-RmpcCommand $downloadCmd
+            $output = & wsl-rmpc-exec -Command $formattedDownloadCmd
+            
+            # Check if download was successful (yt-dlp exits with 0 on success)
+            if ($LASTEXITCODE -eq 0)
+            {
+                Send-Notification -Title "Download Complete" -Message "Successfully downloaded: $videoTitle"
+            } else
+            {
+                Send-Notification -Title "Download Failed" -Message "Failed to download: $videoTitle"
+            }
+        }
+    }
+}
+
+function Invoke-RestartMPD
+{ Invoke-RmpcCommand "systemctl --user restart mpd && echo `"MPD restarted successfully`" || echo `"Failed to restart MPD`"" "restart-mpd" 
+}
+function Invoke-RestartFfplay
+{ pwsh-msg -Command "ffplay-keeper" -Restart -Name "Rmpc Control" -PipeName "PWSH_COMMAND_PIPE" 
+}
 
 function Invoke-Main
 {
     $action = Get-ActionSelection
-    if (-not $action) { exit 0 }
+    if (-not $action)
+    { exit 0 
+    }
 
-    if ($action -notmatch "Restart ffplay") {
+    if ($action -notmatch "Restart ffplay")
+    {
         [void](Mount-CachyOSDrive)
         [void](Start-MPDIfNeeded)
     }
     
     switch -Regex ($action)
     {
-        "^Play/Pause*" { Invoke-PlayPause }
-        "^Skip*" { Invoke-Skip }
-        "^Previous*" { Invoke-Previous }
-        "^Add$" { Invoke-AddLocal }
-        "^Play Next$" { Invoke-PlayNextLocal }
-        "^Play Now$" { Invoke-PlayNowLocal }
-        "^Add YT Link" { Invoke-AddYouTubeLink }
-        "^Play Next YT Link" { Invoke-PlayNextYouTubeLink }
-        "^Play Now YT Link" { Invoke-PlayNowYouTubeLink }
-        "^Add Search" { Invoke-AddSearch }
-        "^Play Next Search" { Invoke-PlayNextSearch }
-        "^Play Now Search" { Invoke-PlayNowSearch }
-        "^Current" { Invoke-ShowCurrent }
-        "^Volume" { Invoke-VolumeControl }
-        "^Download Youtube" { Invoke-DownloadYouTube }
-        "^Restart MPD" { Invoke-RestartMPD }
-        "^Restart ffplay" { Invoke-RestartFfplay }
+        "^Play/Pause*"
+        { Invoke-PlayPause 
+        }
+        "^Skip*"
+        { Invoke-Skip 
+        }
+        "^Previous*"
+        { Invoke-Previous 
+        }
+        "^Add$"
+        { Invoke-AddLocal 
+        }
+        "^Play Next$"
+        { Invoke-PlayNextLocal 
+        }
+        "^Play Now$"
+        { Invoke-PlayNowLocal 
+        }
+        "^Add YT Link"
+        { Invoke-AddYouTubeLink 
+        }
+        "^Play Next YT Link"
+        { Invoke-PlayNextYouTubeLink 
+        }
+        "^Play Now YT Link"
+        { Invoke-PlayNowYouTubeLink 
+        }
+        "^Add Search"
+        { Invoke-AddSearch 
+        }
+        "^Play Next Search"
+        { Invoke-PlayNextSearch 
+        }
+        "^Play Now Search"
+        { Invoke-PlayNowSearch 
+        }
+        "^Current"
+        { Invoke-ShowCurrent 
+        }
+        "^Volume"
+        { Invoke-VolumeControl 
+        }
+        "^Download Youtube"
+        { Invoke-DownloadYouTube 
+        }
+        "^Restart MPD"
+        { Invoke-RestartMPD 
+        }
+        "^Restart ffplay"
+        { Invoke-RestartFfplay 
+        }
     }
 }
 

@@ -297,7 +297,7 @@ $actionLabel = if ($HideMode)
 { 'Focus' 
 }
 
-$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") -p "Select Window ($actionLabel Mode)"
+$selection = & $WlinesWrapper -InputContent ($items.Label -join "`n") -p "$actionLabel Window"
 if ([string]::IsNullOrWhiteSpace($selection))
 {
     return
