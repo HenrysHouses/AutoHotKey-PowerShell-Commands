@@ -1,3 +1,6 @@
+# NOTICE
+This turned into a vibe coding test project after the initial logic was done which turned it into a mess. The plan is to redo it in some other way without destroying it with AI.
+
 # PowerShell Pipe Commands
 
 A set of scripts to enable near-instant execution of PowerShell commands from external sources (AHK, CLI, etc.) by using a background daemon that reuses PowerShell instances.
