@@ -136,7 +136,8 @@ function Send-Notification
             $Title = "RMPC: $Title"     
         }
 
-        New-BurntToastNotification -Text "$Title", "$Message" -Silent
+        New-BurntToastNotification -Text "$Title", "$Message" -Silent -AppLogo "C:\Users\Henri\Pictures\Terminal.png"
+        # -HeroImage should be the album art once thats implemented
     } catch
     {
         # Silently fail if BurntToast is not available

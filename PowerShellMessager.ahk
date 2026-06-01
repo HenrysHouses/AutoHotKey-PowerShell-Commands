@@ -23,12 +23,12 @@ OnExit(KillConnection)
 }
 
 !Tab:: {
-	content := "__FROM__:AutoHotKeys`nwglazetab"
+	content := "__FROM__:AutoHotKeys`nwglazetab -gui"
 	PipeWrite(content, pipeName)
 }
 
 ^!Tab:: {
-	content := "__FROM__:AutoHotKeys`nwglazetab -HideMode"
+	content := "__FROM__:AutoHotKeys`nwglazetab -gui -HideMode"
 	PipeWrite(content, pipeName)
 }
 
@@ -57,10 +57,10 @@ OnExit(KillConnection)
 	PipeWrite(content, pipeName)
 }
 
-^!+m:: {
-	content := "__FROM__:AutoHotKeys`nwmusic"
-	PipeWrite(content, pipeName)
-}
+; ^!+m:: {
+; 	content := "__FROM__:AutoHotKeys`nwmusic"
+; 	PipeWrite(content, pipeName)
+; }
 
 ^!b:: {
 	content := "__FROM__:AutoHotKeys`nwbookmarks"

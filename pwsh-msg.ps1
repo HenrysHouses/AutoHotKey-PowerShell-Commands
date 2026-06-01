@@ -37,7 +37,16 @@ $client = New-Object System.IO.Pipes.NamedPipeClientStream(
     [System.IO.Pipes.PipeDirection]::Out
 )
 
-$client.Connect()
+try
+{
+    $client.Connect()
+}
+catch
+{
+    Write-Host "[ERROR] Failed to connect to pipe '$PipeName'. Is the daemon running?" -ForegroundColor Red
+    Write-Host "Error: $_" -ForegroundColor Red
+    exit 1
+}
 
 $writer = New-Object System.IO.StreamWriter($client)
 $writer.AutoFlush = $true

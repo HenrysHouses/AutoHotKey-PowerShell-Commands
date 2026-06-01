@@ -4,7 +4,7 @@ param(
     [string]$Hide,
     [switch]$HideMode,
     [switch]$Help,
-    [switch]$fzf
+    [switch]$gui
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,12 +58,12 @@ SAFETY FEATURES:
     return
 }
 
-$WlinesWrapper = if ($fzf)
-{
-    Join-Path $PSScriptRoot 'wfzf.ps1'
-} else
+$WlinesWrapper = if ($gui)
 {
     Join-Path $PSScriptRoot 'wrofi.ps1'
+} else
+{
+    Join-Path $PSScriptRoot 'wfzf.ps1'
 }
 
 # Auto-detect SSH session

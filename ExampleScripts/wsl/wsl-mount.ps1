@@ -8,4 +8,5 @@ if ($null -ne $alive)
     exit 1
 }
 
-Start-Process -FilePath "sudo" -ArgumentList "-s", "wsl.exe", "--mount", $drivePath -WindowStyle Hidden
+Start-Process -FilePath "sudo" -ArgumentList "-s", "wsl.exe", "--mount", "--bare", $drivePath -WindowStyle Hidden
+# Start-Process -FilePath "sudo" -ArgumentList "-s", "wsl.exe", "--mount", "--bare", "\\.\PHYSICALDRIVE0" -WindowStyle Hidden

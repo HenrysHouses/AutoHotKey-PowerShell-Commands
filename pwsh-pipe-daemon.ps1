@@ -585,6 +585,17 @@ if ($Kill -eq -1)
 
         $previewCmd = "pwsh -NoProfile -File `"$PSCommandPath`" -Preview {2}"
         $selected = $pipeNames | fzf --prompt "Kill: " --footer "Select Daemon To Kill" --footer-label-pos "center" --preview $previewCmd --preview-window='top,80%' --delimiter='|' --with-nth='{1}' --ansi
+
+        # Extract PID
+        
+        if ($selected -match 'PID:\s*(\d+)\|(.+)')
+        {
+            Write-Host $selected
+            $target_pid = [int]$Matches[1]
+            $json = $Matches[2]
+            Stop-Daemon -DaemonPID $target_pid -DaemonTempFile $json
+            exit 0
+        }
     } else
     {
         Write-Host ""

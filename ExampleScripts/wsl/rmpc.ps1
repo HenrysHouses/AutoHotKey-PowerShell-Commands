@@ -24,12 +24,14 @@ try
 Write-Host "Starting rmpc inside WSL..."
 if ($Distro -ne "")
 {
-    & wsl -- rmpc
+    # & wsl -- rmpc
+    tmux new -A -s rmpc -- wsl -e rmpc
 } else
 {
     try
     {
-        wsl -- rmpc
+        # wsl -- rmpc
+        tmux new -A -s rmpc -- wsl -e rmpc
     } catch 
     {
         & $(wsl -- sudo pkill -p $(pidof "mpd"); mpd)
